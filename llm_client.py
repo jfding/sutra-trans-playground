@@ -62,6 +62,57 @@ class LLMClient:
         # OpenAI-specific settings
         self.model = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
 
+    def _snake_to_camel(self, snake_str: str) -> str:
+        """
+        Convert SNAKE_CASE to camelCase.
+
+        Args:
+            snake_str: String in SNAKE_CASE format
+
+        Returns:
+            String in camelCase format
+        """
+        components = snake_str.lower().split('_')
+        return components[0] + ''.join(x.capitalize() for x in components[1:])
+
+    def _get_metaso_env_payload(self) -> Dict[str, Any]:
+        """
+        Collect all METASO_* environment variables and convert them to payload format.
+
+        Returns:
+            Dictionary with payload keys and values from METASO_* env vars
+        """
+        env_payload = {}
+
+        # Get all environment variables
+        for key, value in os.environ.items():
+            if key.startswith("METASO_"):
+                # Skip authentication keys (they go in headers, not payload)
+                if key in ("METASO_SECRET_KEY", "METASO_API_KEY"):
+                    continue
+
+                # Remove METASO_ prefix and convert to camelCase
+                payload_key = self._snake_to_camel(key[7:])  # Remove "METASO_" prefix
+
+                # Handle special cases for type conversion
+                if payload_key in ("enableMix", "enableImage", "stream"):
+                    # Boolean fields
+                    env_payload[payload_key] = value.lower() in ("true", "1", "yes")
+                elif payload_key == "sessionId":
+                    # Integer field
+                    try:
+                        env_payload[payload_key] = int(value)
+                    except ValueError:
+                        # If conversion fails, skip it
+                        continue
+                elif value in ('true', 'false', 'True', 'False'):
+                    env_payload[payload_key] = value.lower() in ("true", "1", "yes")
+                else:
+                    # String fields - use as is
+                    env_payload[payload_key] = value
+
+        return env_payload
+
     def _log_request_details(
         self,
         method: str,
@@ -222,6 +273,12 @@ class LLMClient:
         if engine_type is not None:
             payload["engineType"] = engine_type
 
+        # Add all METASO_* environment variables to payload (only if not already set)
+        env_payload = self._get_metaso_env_payload()
+        for key, value in env_payload.items():
+            if key not in payload:
+                payload[key] = value
+
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -291,6 +348,12 @@ class LLMClient:
             payload["enableImage"] = enable_image
         if engine_type is not None:
             payload["engineType"] = engine_type
+
+        # Add all METASO_* environment variables to payload (only if not already set)
+        env_payload = self._get_metaso_env_payload()
+        for key, value in env_payload.items():
+            if key not in payload:
+                payload[key] = value
 
         headers = {
             "Content-Type": "application/json",
