@@ -290,6 +290,16 @@
                 <label for="inputText">Input Text</label>
                 <textarea id="inputText" placeholder="Enter text to replace {input_txt} in template..."></textarea>
             </div>
+
+            <div class="input-group" id="inputText2Group" style="display: none;">
+                <label for="inputText2">Input Text 2</label>
+                <textarea id="inputText2" placeholder="Enter text to replace {input2_txt} in template..."></textarea>
+            </div>
+
+            <div class="input-group" id="inputText3Group" style="display: none;">
+                <label for="inputText3">Input Text 3</label>
+                <textarea id="inputText3" placeholder="Enter text to replace {input3_txt} in template..."></textarea>
+            </div>
             
             <div class="input-group">
                 <label for="temperature">Temperature: <span class="temperature-value" id="tempValue">0.7</span></label>
@@ -316,6 +326,8 @@
     <script>
         let history = JSON.parse(localStorage.getItem('llm_history') || '[]');
         let currentTemplateName = null;
+        let templateHasInput2 = false;
+        let templateHasInput3 = false;
 
         // Load templates on page load
         async function loadTemplates() {
@@ -347,8 +359,14 @@
             
             if (!templateName) {
                 currentTemplateName = null;
+                templateHasInput2 = false;
+                templateHasInput3 = false;
                 document.getElementById('inputTextGroup').style.display = 'none';
+                document.getElementById('inputText2Group').style.display = 'none';
+                document.getElementById('inputText3Group').style.display = 'none';
                 document.getElementById('inputText').value = '';
+                document.getElementById('inputText2').value = '';
+                document.getElementById('inputText3').value = '';
                 previewDiv.style.display = 'none';
                 return;
             }
@@ -361,6 +379,8 @@
                 
                 const data = await response.json();
                 currentTemplateName = templateName;
+                templateHasInput2 = data.content.includes('{input2_txt}');
+                templateHasInput3 = data.content.includes('{input3_txt}');
                 
                 // Display template preview with highlighted placeholders
                 const templateContent = data.content;
@@ -374,11 +394,17 @@
                 
                 // Always show input text field when template is loaded
                 document.getElementById('inputTextGroup').style.display = 'block';
+                document.getElementById('inputText2Group').style.display = templateHasInput2 ? 'block' : 'none';
+                document.getElementById('inputText3Group').style.display = templateHasInput3 ? 'block' : 'none';
                 document.getElementById('inputText').focus();
             } catch (error) {
                 alert(`Error loading template: ${error.message}`);
                 currentTemplateName = null;
+                templateHasInput2 = false;
+                templateHasInput3 = false;
                 document.getElementById('inputTextGroup').style.display = 'none';
+                document.getElementById('inputText2Group').style.display = 'none';
+                document.getElementById('inputText3Group').style.display = 'none';
                 previewDiv.style.display = 'none';
             }
         }
@@ -392,8 +418,14 @@
         document.getElementById('template').addEventListener('change', (e) => {
             if (!e.target.value) {
                 currentTemplateName = null;
+                templateHasInput2 = false;
+                templateHasInput3 = false;
                 document.getElementById('inputTextGroup').style.display = 'none';
+                document.getElementById('inputText2Group').style.display = 'none';
+                document.getElementById('inputText3Group').style.display = 'none';
                 document.getElementById('inputText').value = '';
+                document.getElementById('inputText2').value = '';
+                document.getElementById('inputText3').value = '';
                 document.getElementById('templatePreview').style.display = 'none';
             } else {
                 // Auto-load the selected template
@@ -445,7 +477,21 @@
                 // New format with template_name field
                 document.getElementById('template').value = item.template_name;
                 await loadTemplate();
-                document.getElementById('inputText').value = item.input_text || '';
+                let texts = item.input_texts || [];
+                if ((!texts || texts.length === 0) && item.input_text) {
+                    // Fallback for older saved format with single input_text
+                    texts = [item.input_text];
+                }
+                if ((!texts || texts.length === 0) && item.prompt) {
+                    // Last resort: try parsing from prompt
+                    const parsed = item.prompt.replace(/^\[Template: .+?\] /, '').split(' | ');
+                    if (parsed.length > 0 && parsed[0].trim()) {
+                        texts = parsed;
+                    }
+                }
+                document.getElementById('inputText').value = texts[0] || '';
+                document.getElementById('inputText2').value = texts[1] || '';
+                document.getElementById('inputText3').value = texts[2] || '';
             } else {
                 // Old format - try to parse from prompt string
                 const templateMatch = item.prompt.match(/^\[Template: (.+?)\]/);
@@ -455,6 +501,8 @@
                     await loadTemplate();
                     const inputText = item.prompt.replace(/^\[Template: .+?\] /, '');
                     document.getElementById('inputText').value = inputText;
+                    document.getElementById('inputText2').value = '';
+                    document.getElementById('inputText3').value = '';
                 } else {
                     alert('This history item does not have template information');
                     return;
@@ -480,18 +528,41 @@
                 return;
             }
             
-            // Require input text
-            const inputText = document.getElementById('inputText').value.trim();
-            if (!inputText) {
+            // Collect inputs based on placeholders
+            const inputText1 = document.getElementById('inputText').value.trim();
+            const inputText2 = document.getElementById('inputText2').value.trim();
+            const inputText3 = document.getElementById('inputText3').value.trim();
+
+            if (!inputText1) {
                 alert('Please enter input text');
                 return;
+            }
+
+            const input_texts = [inputText1];
+            if (templateHasInput2) {
+                if (!inputText2) {
+                    alert('Please enter Input Text 2 (for {input2_txt})');
+                    return;
+                }
+                input_texts.push(inputText2);
+            }
+            if (templateHasInput3) {
+                if (!inputText3) {
+                    alert('Please enter Input Text 3 (for {input3_txt})');
+                    return;
+                }
+                // If template has input3 but not input2, ensure order; push empty second if needed
+                if (!templateHasInput2 && input_texts.length === 1) {
+                    input_texts.push(inputText1);
+                }
+                input_texts.push(inputText3);
             }
             
             // Prepare request payload with template
             const requestBody = {
                 temperature,
                 template_name: currentTemplateName,
-                input_texts: [inputText]
+                input_texts
             };
             
             console.log('Submitting with:', requestBody);
@@ -545,11 +616,11 @@
 
                 // Save to history
                 const historyItem = {
-                    prompt: `[Template: ${currentTemplateName}] ${inputText}`,
+                    prompt: `[Template: ${currentTemplateName}] ${input_texts.join(' | ')}`,
                     response: fullResponse,
                     temperature,
                     template_name: currentTemplateName,
-                    input_text: inputText,
+                    input_texts,
                     timestamp: new Date().toISOString()
                 };
                 history.unshift(historyItem);
