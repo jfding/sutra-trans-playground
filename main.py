@@ -103,6 +103,11 @@ def main():
         action="store_true",
         help="Print and save HTTP request details"
     )
+    parser.add_argument(
+        "-T", "--temperature",
+        type=float,
+        help="Temperature parameter for API calls (float value)"
+    )
 
     args = parser.parse_args()
 
@@ -207,13 +212,23 @@ def main():
             print("Calling OpenAI API...", file=sys.stderr)
 
             # Get OpenAI settings from environment variables
-            temperature = 0.7  # Default value
+            temperature = 0.7 # default 0.7
             if os.getenv("LLM_TEMPERATURE"):
                 try:
                     temperature = float(os.getenv("LLM_TEMPERATURE"))
                 except ValueError:
                     print("Warning: Invalid LLM_TEMPERATURE value, using default 0.7", file=sys.stderr)
                     temperature = 0.7
+
+            if args.temperature:
+                try:
+                    tt = float(args.temperature)
+                    if tt >= 0.0 and tt <= 2.0:
+                        temperature = tt
+                    else:
+                        print(f"Warning: Invalid temperature value, using {temperature}", file=sys.stderr)
+                except ValueError:
+                    print(f"Warning: Invalid temperature value, using {temperature}", file=sys.stderr)
 
             max_tokens = None
             if os.getenv("LLM_MAX_TOKENS"):
