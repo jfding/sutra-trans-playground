@@ -245,6 +245,29 @@
             outline: none;
             border-color: #4a90e2;
         }
+
+        .template-preview {
+            background: #f9f9f9;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            padding: 12px;
+            margin-top: 8px;
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            color: #555;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .template-preview-placeholder {
+            background: #fff3cd;
+            color: #856404;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>
@@ -260,6 +283,7 @@
                     </select>
                     <button onclick="loadTemplate()" id="loadTemplateBtn">Load</button>
                 </div>
+                <div id="templatePreview" class="template-preview" style="display: none;"></div>
             </div>
             
             <div class="input-group" id="inputTextGroup">
@@ -319,10 +343,13 @@
         // Load selected template
         async function loadTemplate() {
             const templateName = document.getElementById('template').value;
+            const previewDiv = document.getElementById('templatePreview');
+            
             if (!templateName) {
                 currentTemplateName = null;
                 document.getElementById('inputTextGroup').style.display = 'none';
                 document.getElementById('inputText').value = '';
+                previewDiv.style.display = 'none';
                 return;
             }
 
@@ -335,6 +362,16 @@
                 const data = await response.json();
                 currentTemplateName = templateName;
                 
+                // Display template preview with highlighted placeholders
+                const templateContent = data.content;
+                const highlightedContent = templateContent
+                    .replace(/\{input_txt\}/g, '<span class="template-preview-placeholder">{input_txt}</span>')
+                    .replace(/\{input2_txt\}/g, '<span class="template-preview-placeholder">{input2_txt}</span>')
+                    .replace(/\{input3_txt\}/g, '<span class="template-preview-placeholder">{input3_txt}</span>');
+                
+                previewDiv.innerHTML = highlightedContent;
+                previewDiv.style.display = 'block';
+                
                 // Always show input text field when template is loaded
                 document.getElementById('inputTextGroup').style.display = 'block';
                 document.getElementById('inputText').focus();
@@ -342,6 +379,7 @@
                 alert(`Error loading template: ${error.message}`);
                 currentTemplateName = null;
                 document.getElementById('inputTextGroup').style.display = 'none';
+                previewDiv.style.display = 'none';
             }
         }
 
@@ -356,6 +394,7 @@
                 currentTemplateName = null;
                 document.getElementById('inputTextGroup').style.display = 'none';
                 document.getElementById('inputText').value = '';
+                document.getElementById('templatePreview').style.display = 'none';
             } else {
                 // Auto-load the selected template
                 loadTemplate();
