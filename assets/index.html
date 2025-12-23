@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Chat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 24px;
+        }
+
+        h1 {
+            margin-bottom: 24px;
+            color: #333;
+            font-size: 24px;
+        }
+
+        .input-section {
+            margin-bottom: 20px;
+        }
+
+        .input-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #4a90e2;
+        }
+
+        .temperature-control {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        input[type="range"] {
+            flex: 1;
+        }
+
+        .temperature-value {
+            min-width: 50px;
+            text-align: right;
+            font-weight: 500;
+            color: #333;
+        }
+
+        button {
+            background: #4a90e2;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover:not(:disabled) {
+            background: #357abd;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .response-section {
+            margin-top: 24px;
+        }
+
+        .response {
+            background: #f9f9f9;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            padding: 16px;
+            min-height: 100px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .response.loading {
+            color: #999;
+            font-style: italic;
+        }
+
+        .history-section {
+            margin-top: 32px;
+            border-top: 1px solid #e0e0e0;
+            padding-top: 24px;
+        }
+
+        .history-item {
+            background: #f9f9f9;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+            position: relative;
+        }
+
+        .history-item:hover {
+            background: #f0f0f0;
+        }
+
+        .history-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .history-delete-btn {
+            background: #ff4444;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+
+        .history-delete-btn:hover {
+            background: #cc0000;
+        }
+
+        .history-prompt {
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 8px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .history-response {
+            color: #666;
+            font-size: 13px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .history-meta {
+            font-size: 12px;
+            color: #999;
+            margin-top: 8px;
+        }
+
+        .error {
+            color: #d32f2f;
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            padding: 12px;
+            border-radius: 4px;
+            margin-top: 12px;
+        }
+
+        select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: inherit;
+            background: white;
+            cursor: pointer;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #4a90e2;
+        }
+
+        .template-input-group {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .template-input-group select {
+            flex: 1;
+        }
+
+        .template-input-group button {
+            padding: 8px 16px;
+            font-size: 13px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #4a90e2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>LLM Chat</h1>
+        
+        <div class="input-section">
+            <div class="input-group">
+                <label for="template">Template</label>
+                <div class="template-input-group">
+                    <select id="template">
+                        <option value="">-- Select a template --</option>
+                    </select>
+                    <button onclick="loadTemplate()" id="loadTemplateBtn">Load</button>
+                </div>
+            </div>
+            
+            <div class="input-group" id="inputTextGroup">
+                <label for="inputText">Input Text</label>
+                <textarea id="inputText" placeholder="Enter text to replace {input_txt} in template..."></textarea>
+            </div>
+            
+            <div class="input-group">
+                <label for="temperature">Temperature: <span class="temperature-value" id="tempValue">0.7</span></label>
+                <div class="temperature-control">
+                    <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
+                </div>
+            </div>
+            
+            <button id="submitBtn" onclick="submitPrompt()">Send</button>
+        </div>
+
+        <div class="response-section">
+            <label>Response</label>
+            <div id="response" class="response"></div>
+            <div id="error" class="error" style="display: none;"></div>
+        </div>
+
+        <div class="history-section">
+            <h2 style="font-size: 18px; margin-bottom: 16px;">History</h2>
+            <div id="history"></div>
+        </div>
+    </div>
+
+    <script>
+        let history = JSON.parse(localStorage.getItem('llm_history') || '[]');
+        let currentTemplateName = null;
+
+        // Load templates on page load
+        async function loadTemplates() {
+            try {
+                const response = await fetch('/api/templates');
+                const data = await response.json();
+                const select = document.getElementById('template');
+                
+                // Clear existing options except the first one
+                while (select.options.length > 1) {
+                    select.remove(1);
+                }
+                
+                data.templates.forEach(template => {
+                    const option = document.createElement('option');
+                    option.value = template;
+                    option.textContent = template;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Failed to load templates:', error);
+            }
+        }
+
+        // Load selected template
+        async function loadTemplate() {
+            const templateName = document.getElementById('template').value;
+            if (!templateName) {
+                currentTemplateName = null;
+                document.getElementById('inputTextGroup').style.display = 'none';
+                document.getElementById('inputText').value = '';
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/templates/${templateName}`);
+                if (!response.ok) {
+                    throw new Error('Failed to load template');
+                }
+                
+                const data = await response.json();
+                currentTemplateName = templateName;
+                
+                // Always show input text field when template is loaded
+                document.getElementById('inputTextGroup').style.display = 'block';
+                document.getElementById('inputText').focus();
+            } catch (error) {
+                alert(`Error loading template: ${error.message}`);
+                currentTemplateName = null;
+                document.getElementById('inputTextGroup').style.display = 'none';
+            }
+        }
+
+        // Update temperature display
+        document.getElementById('temperature').addEventListener('input', (e) => {
+            document.getElementById('tempValue').textContent = parseFloat(e.target.value).toFixed(1);
+        });
+
+        // Auto-load template when dropdown changes
+        document.getElementById('template').addEventListener('change', (e) => {
+            if (!e.target.value) {
+                currentTemplateName = null;
+                document.getElementById('inputTextGroup').style.display = 'none';
+                document.getElementById('inputText').value = '';
+            } else {
+                // Auto-load the selected template
+                loadTemplate();
+            }
+        });
+
+        // Load history on page load
+        function loadHistory() {
+            const historyDiv = document.getElementById('history');
+            if (history.length === 0) {
+                historyDiv.innerHTML = '<p style="color: #999; font-style: italic;">No history yet</p>';
+                return;
+            }
+            
+            historyDiv.innerHTML = history.map((item, index) => `
+                <div class="history-item">
+                    <div class="history-item-header">
+                        <div style="flex: 1;" onclick="loadHistoryItem(${index})">
+                            <div class="history-prompt">${escapeHtml(item.prompt)}</div>
+                            <div class="history-response">${escapeHtml(item.response.substring(0, 150))}${item.response.length > 150 ? '...' : ''}</div>
+                            <div class="history-meta">Temp: ${item.temperature} • ${new Date(item.timestamp).toLocaleString()}</div>
+                        </div>
+                        <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem(${index})" title="Delete">×</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function deleteHistoryItem(index) {
+            if (confirm('Are you sure you want to delete this history item?')) {
+                history.splice(index, 1);
+                localStorage.setItem('llm_history', JSON.stringify(history));
+                loadHistory();
+            }
+        }
+
+        async function loadHistoryItem(index) {
+            const item = history[index];
+            
+            // Load template and input text from history
+            if (item.template_name) {
+                // New format with template_name field
+                document.getElementById('template').value = item.template_name;
+                await loadTemplate();
+                document.getElementById('inputText').value = item.input_text || '';
+            } else {
+                // Old format - try to parse from prompt string
+                const templateMatch = item.prompt.match(/^\[Template: (.+?)\]/);
+                if (templateMatch) {
+                    const templateName = templateMatch[1];
+                    document.getElementById('template').value = templateName;
+                    await loadTemplate();
+                    const inputText = item.prompt.replace(/^\[Template: .+?\] /, '');
+                    document.getElementById('inputText').value = inputText;
+                } else {
+                    alert('This history item does not have template information');
+                    return;
+                }
+            }
+            
+            document.getElementById('temperature').value = item.temperature;
+            document.getElementById('tempValue').textContent = parseFloat(item.temperature).toFixed(1);
+            document.getElementById('response').textContent = item.response;
+            document.getElementById('response').classList.remove('loading');
+            document.getElementById('error').style.display = 'none';
+        }
+
+        async function submitPrompt() {
+            const temperature = parseFloat(document.getElementById('temperature').value);
+            const submitBtn = document.getElementById('submitBtn');
+            const responseDiv = document.getElementById('response');
+            const errorDiv = document.getElementById('error');
+            
+            // Require template selection
+            if (!currentTemplateName) {
+                alert('Please select and load a template first');
+                return;
+            }
+            
+            // Require input text
+            const inputText = document.getElementById('inputText').value.trim();
+            if (!inputText) {
+                alert('Please enter input text');
+                return;
+            }
+            
+            // Prepare request payload with template
+            const requestBody = {
+                temperature,
+                template_name: currentTemplateName,
+                input_texts: [inputText]
+            };
+            
+            console.log('Submitting with:', requestBody);
+            
+            submitBtn.disabled = true;
+            responseDiv.textContent = '';
+            responseDiv.classList.add('loading');
+            responseDiv.textContent = 'Loading...';
+            errorDiv.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Request failed');
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullResponse = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.substring(6);
+                            if (data === '[DONE]') {
+                                break;
+                            }
+                            if (data.startsWith('ERROR: ')) {
+                                throw new Error(data.substring(7));
+                            }
+                            fullResponse += data;
+                            responseDiv.textContent = fullResponse;
+                            responseDiv.classList.remove('loading');
+                        }
+                    }
+                }
+
+                // Save to history
+                const historyItem = {
+                    prompt: `[Template: ${currentTemplateName}] ${inputText}`,
+                    response: fullResponse,
+                    temperature,
+                    template_name: currentTemplateName,
+                    input_text: inputText,
+                    timestamp: new Date().toISOString()
+                };
+                history.unshift(historyItem);
+                // Keep only last 20 items
+                if (history.length > 20) {
+                    history = history.slice(0, 20);
+                }
+                localStorage.setItem('llm_history', JSON.stringify(history));
+                loadHistory();
+
+            } catch (error) {
+                errorDiv.textContent = `Error: ${error.message}`;
+                errorDiv.style.display = 'block';
+                responseDiv.textContent = '';
+                responseDiv.classList.remove('loading');
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+
+        // Allow Enter key to submit in textarea (Shift+Enter for new line)
+        document.getElementById('inputText').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitPrompt();
+            }
+        });
+
+        // Load templates and history on page load
+        loadTemplates();
+        loadHistory();
+    </script>
+</body>
+</html>
+
