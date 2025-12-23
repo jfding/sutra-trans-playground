@@ -10,7 +10,7 @@ from llm_client import LLMClient
 project_root = Path(__file__).parent
 load_dotenv(dotenv_path=project_root / ".env")
 
-app = Flask(__name__, template_folder='assets')
+app = Flask(__name__, template_folder='assets', static_folder='assets', static_url_path='/static')
 CORS(app)
 
 # Initialize LLM client
