@@ -9,12 +9,12 @@ async function loadTemplates() {
         const response = await fetch('/api/templates');
         const data = await response.json();
         const select = document.getElementById('template');
-        
+
         // Clear existing options except the first one
         while (select.options.length > 1) {
             select.remove(1);
         }
-        
+
         data.templates.forEach(template => {
             const option = document.createElement('option');
             option.value = template;
@@ -30,7 +30,7 @@ async function loadTemplates() {
 async function loadTemplate() {
     const templateName = document.getElementById('template').value;
     const previewDiv = document.getElementById('templatePreview');
-    
+
     if (!templateName) {
         currentTemplateName = null;
         templateHasInput2 = false;
@@ -50,22 +50,22 @@ async function loadTemplate() {
         if (!response.ok) {
             throw new Error('Failed to load template');
         }
-        
+
         const data = await response.json();
         currentTemplateName = templateName;
         templateHasInput2 = data.content.includes('{input2_txt}');
         templateHasInput3 = data.content.includes('{input3_txt}');
-        
+
         // Display template preview with highlighted placeholders
         const templateContent = data.content;
         const highlightedContent = templateContent
             .replace(/\{input_txt\}/g, '<span class="template-preview-placeholder">{input_txt}</span>')
             .replace(/\{input2_txt\}/g, '<span class="template-preview-placeholder">{input2_txt}</span>')
             .replace(/\{input3_txt\}/g, '<span class="template-preview-placeholder">{input3_txt}</span>');
-        
+
         previewDiv.innerHTML = highlightedContent;
         previewDiv.style.display = 'block';
-        
+
         // Always show input text field when template is loaded
         document.getElementById('inputTextGroup').style.display = 'block';
         document.getElementById('inputText2Group').style.display = templateHasInput2 ? 'block' : 'none';
@@ -114,7 +114,7 @@ function loadHistory() {
         historyDiv.innerHTML = '<p style="color: #999; font-style: italic;">No history yet</p>';
         return;
     }
-    
+
     historyDiv.innerHTML = history.map((item, index) => `
         <div class="history-item">
             <div class="history-item-header">
@@ -145,7 +145,7 @@ function deleteHistoryItem(index) {
 
 async function loadHistoryItem(index) {
     const item = history[index];
-    
+
     // Load template and input text from history
     if (item.template_name) {
         // New format with template_name field
@@ -182,7 +182,7 @@ async function loadHistoryItem(index) {
             return;
         }
     }
-    
+
     document.getElementById('temperature').value = item.temperature;
     document.getElementById('tempValue').textContent = parseFloat(item.temperature).toFixed(1);
     document.getElementById('response').textContent = item.response;
@@ -195,13 +195,13 @@ async function submitPrompt() {
     const submitBtn = document.getElementById('submitBtn');
     const responseDiv = document.getElementById('response');
     const errorDiv = document.getElementById('error');
-    
+
     // Require template selection
     if (!currentTemplateName) {
         alert('Please select and load a template first');
         return;
     }
-    
+
     // Collect inputs based on placeholders
     const inputText1 = document.getElementById('inputText').value.trim();
     const inputText2 = document.getElementById('inputText2').value.trim();
@@ -231,16 +231,16 @@ async function submitPrompt() {
         }
         input_texts.push(inputText3);
     }
-    
+
     // Prepare request payload with template
     const requestBody = {
         temperature,
         template_name: currentTemplateName,
         input_texts
     };
-    
+
     console.log('Submitting with:', requestBody);
-    
+
     submitBtn.disabled = true;
     responseDiv.textContent = '';
     responseDiv.classList.add('loading');
@@ -257,8 +257,35 @@ async function submitPrompt() {
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Request failed');
+            const contentType = response.headers.get('content-type');
+            let errorMessage = 'Request failed';
+
+            if (contentType && contentType.includes('application/json')) {
+                try {
+                    const error = await response.json();
+                    errorMessage = error.error || errorMessage;
+                } catch (e) {
+                    // If JSON parsing fails, fall through to text parsing
+                }
+            } else {
+                // If not JSON, try to read as text
+                try {
+                    const text = await response.text();
+                    // Try to extract meaningful error from HTML or text
+                    if (text.includes('<html>')) {
+                        // It's an HTML error page, extract title or h1 if available
+                        const titleMatch = text.match(/<title>(.*?)<\/title>/i);
+                        const h1Match = text.match(/<h1>(.*?)<\/h1>/i);
+                        errorMessage = titleMatch ? titleMatch[1] : (h1Match ? h1Match[1] : `Server error (${response.status})`);
+                    } else {
+                        errorMessage = text || `Server error (${response.status})`;
+                    }
+                } catch (e) {
+                    errorMessage = `Server error (${response.status} ${response.statusText})`;
+                }
+            }
+
+            throw new Error(errorMessage);
         }
 
         const reader = response.body.getReader();
