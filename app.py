@@ -216,6 +216,10 @@ def chat():
         elif not prompt:
             return jsonify({'error': 'Either prompt or template_name with input_texts is required'}), 400
 
+        # Extract API-specific parameters from config
+        metaso_params = api_config.get('metaso_params', {})
+        openai_params = api_config.get('openai_params', {})
+
         # Create or get client with specified API URL, model, and api_key_name
         # Use None for model if it's explicitly None (for Metaso), otherwise use the provided value or default
         cache_key = f"{api_url}:{model or 'None'}:{api_key_name or 'default'}"
@@ -225,20 +229,22 @@ def chat():
                 api_url=api_url,
                 model=model if model else None,
                 api_key_name=api_key_name,
-                verbose=False
+                verbose=False,
+                metaso_params=metaso_params,
+                openai_params=openai_params
             )
         llm_client = client_cache[cache_key]
 
         # Check API type
         if llm_client.api_type == "openai":
-            # OpenAI API
-            system_prompt = os.getenv("LLM_SYSTEM_PROMPT")
-            max_tokens = None
-            if os.getenv("LLM_MAX_TOKENS"):
+            # OpenAI API - get parameters from config
+            system_prompt = openai_params.get('system_prompt')
+            max_tokens = openai_params.get('max_tokens')
+            if max_tokens is not None:
                 try:
-                    max_tokens = int(os.getenv("LLM_MAX_TOKENS"))
-                except ValueError:
-                    pass
+                    max_tokens = int(max_tokens)
+                except (ValueError, TypeError):
+                    max_tokens = None
 
             # Stream the response
             def generate():
@@ -256,18 +262,18 @@ def chat():
 
             return Response(generate(), mimetype='text/event-stream')
         else:
-            # Metaso API - doesn't support temperature, but we'll call it anyway
-            lang = os.getenv("METASO_LANG")
-            session_id = os.getenv("METASO_SESSION_ID")
-            if session_id:
+            # Metaso API - get parameters from config
+            lang = metaso_params.get('lang')
+            session_id = metaso_params.get('session_id')
+            if session_id is not None:
                 try:
                     session_id = int(session_id)
-                except ValueError:
+                except (ValueError, TypeError):
                     session_id = None
-            third_party_uid = os.getenv("METASO_THIRD_PARTY_UID")
-            enable_mix = os.getenv("METASO_ENABLE_MIX", "false").lower() in ("true", "1", "yes")
-            enable_image = os.getenv("METASO_ENABLE_IMAGE", "false").lower() in ("true", "1", "yes")
-            engine_type = os.getenv("METASO_ENGINE_TYPE")
+            third_party_uid = metaso_params.get('third_party_uid')
+            enable_mix = metaso_params.get('enable_mix', False)
+            enable_image = metaso_params.get('enable_image', False)
+            engine_type = metaso_params.get('engine_type')
 
             def generate():
                 try:
@@ -284,6 +290,23 @@ def chat():
                         if msg_type == "append-text":
                             text = message.get("text", "")
                             yield f"data: {text}\n\n"
+                        elif msg_type == "set-reference":
+                            # Format references for display
+                            ref_list = message.get("list", [])
+                            if ref_list:
+                                ref_text = "\n\nReferences:\n"
+                                for ref in ref_list:
+                                    title = ref.get("title", "")
+                                    link = ref.get("link", "")
+                                    index = ref.get("index", "")
+                                    ref_text += f"  [{index}] {title}\n    {link}\n"
+                                yield f"data: {ref_text}\n\n"
+                        elif msg_type == "query":
+                            # Optionally show keywords if available
+                            keywords = message.get("data", [])
+                            if keywords:
+                                keywords_text = f"Keywords: {', '.join(keywords)}\n\n"
+                                yield f"data: {keywords_text}\n\n"
                         elif msg_type == "error":
                             code = message.get("code")
                             msg = message.get("msg", "Unknown error")

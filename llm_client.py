@@ -21,7 +21,9 @@ class LLMClient:
         api_url: str,
         model: Optional[str] = None,
         api_key_name: str = None,
-        verbose: bool = False
+        verbose: bool = False,
+        metaso_params: Optional[Dict[str, Any]] = None,
+        openai_params: Optional[Dict[str, Any]] = None
     ):
         """
         Initialize API client.
@@ -31,10 +33,12 @@ class LLMClient:
             model: Model name (required for OpenAI API, None for Metaso API)
             api_key_name: Environment variable name for API key (required, from config JSON)
             verbose: If True, print and save HTTP request details
+            metaso_params: Optional Metaso-specific parameters dict
+            openai_params: Optional OpenAI-specific parameters dict
         """
         if not api_url:
             raise ValueError("api_url is required and must be provided from config JSON")
-        
+
         self.verbose = verbose
         self.api_url = api_url
 
@@ -47,7 +51,7 @@ class LLMClient:
         # Get API key from specified environment variable
         if not api_key_name:
             raise ValueError("api_key_name is required and must be provided from config JSON")
-        
+
         if self.api_type == "metaso":
             # Support both secret-key and api-key authentication for Metaso
             self.secret_key = os.getenv("METASO_SECRET_KEY")
@@ -67,6 +71,10 @@ class LLMClient:
         if self.api_type != "metaso" and not self.model:
             raise ValueError("model is required for OpenAI-compatible API")
 
+        # Store API-specific parameters
+        self.metaso_params = metaso_params or {}
+        self.openai_params = openai_params or {}
+
     def _snake_to_camel(self, snake_str: str) -> str:
         """
         Convert SNAKE_CASE to camelCase.
@@ -80,43 +88,32 @@ class LLMClient:
         components = snake_str.lower().split('_')
         return components[0] + ''.join(x.capitalize() for x in components[1:])
 
-    def _get_metaso_env_payload(self) -> Dict[str, Any]:
+    def _get_metaso_config_payload(self) -> Dict[str, Any]:
         """
-        Collect all METASO_* environment variables and convert them to payload format.
+        Get Metaso parameters from config and convert to payload format.
 
         Returns:
-            Dictionary with payload keys and values from METASO_* env vars
+            Dictionary with payload keys and values from config
         """
-        env_payload = {}
+        config_payload = {}
+        params = self.metaso_params or {}
 
-        # Get all environment variables
-        for key, value in os.environ.items():
-            if key.startswith("METASO_"):
-                # Skip authentication keys (they go in headers, not payload)
-                if key in ("METASO_SECRET_KEY", "METASO_API_KEY"):
-                    continue
+        # Map config keys to payload keys (camelCase)
+        key_mapping = {
+            "lang": "lang",
+            "session_id": "sessionId",
+            "third_party_uid": "thirdPartyUid",
+            "enable_mix": "enableMix",
+            "enable_image": "enableImage",
+            "engine_type": "engineType"
+        }
 
-                # Remove METASO_ prefix and convert to camelCase
-                payload_key = self._snake_to_camel(key[7:])  # Remove "METASO_" prefix
+        for config_key, payload_key in key_mapping.items():
+            value = params.get(config_key)
+            if value is not None:
+                config_payload[payload_key] = value
 
-                # Handle special cases for type conversion
-                if payload_key in ("enableMix", "enableImage", "stream"):
-                    # Boolean fields
-                    env_payload[payload_key] = value.lower() in ("true", "1", "yes")
-                elif payload_key == "sessionId":
-                    # Integer field
-                    try:
-                        env_payload[payload_key] = int(value)
-                    except ValueError:
-                        # If conversion fails, skip it
-                        continue
-                elif value in ('true', 'false', 'True', 'False'):
-                    env_payload[payload_key] = value.lower() in ("true", "1", "yes")
-                else:
-                    # String fields - use as is
-                    env_payload[payload_key] = value
-
-        return env_payload
+        return config_payload
 
     def _log_request_details(
         self,
@@ -128,6 +125,7 @@ class LLMClient:
     ) -> None:
         """
         Log HTTP request details to stderr and save to file.
+        Always logs endpoint and payload, regardless of verbose setting.
 
         Args:
             method: HTTP method (e.g., "POST")
@@ -136,8 +134,7 @@ class LLMClient:
             payload: Request payload/body
             response: Optional response object
         """
-        if not self.verbose:
-            return
+        # Always log endpoint and payload, even if verbose=False
 
         # Mask sensitive headers
         safe_headers = {}
@@ -195,12 +192,12 @@ class LLMClient:
                 "body_preview": response_body_preview
             }
 
-        # Print to stderr
+        # Print to stderr - always log endpoint and payload
         print("\n" + "="*80, file=sys.stderr)
         print("HTTP REQUEST DETAILS", file=sys.stderr)
         print("="*80, file=sys.stderr)
         print(f"Method: {method}", file=sys.stderr)
-        print(f"URL: {url}", file=sys.stderr)
+        print(f"Endpoint: {url}", file=sys.stderr)
         print(f"\nHeaders:", file=sys.stderr)
         for key, value in safe_headers.items():
             print(f"  {key}: {value}", file=sys.stderr)
@@ -209,23 +206,26 @@ class LLMClient:
 
         if response:
             print(f"\nResponse Status: {response.status_code}", file=sys.stderr)
-            print(f"Response Headers:", file=sys.stderr)
-            for key, value in response.headers.items():
-                print(f"  {key}: {value}", file=sys.stderr)
-            print(f"\nResponse Body Preview:", file=sys.stderr)
-            print(response_body_preview, file=sys.stderr)
+            if self.verbose:
+                # Only show detailed response info if verbose
+                print(f"Response Headers:", file=sys.stderr)
+                for key, value in response.headers.items():
+                    print(f"  {key}: {value}", file=sys.stderr)
+                print(f"\nResponse Body Preview:", file=sys.stderr)
+                print(response_body_preview, file=sys.stderr)
 
         print("="*80 + "\n", file=sys.stderr)
 
-        # Save to file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_filename = f"http_request_{timestamp}.json"
-        log_path = project_root / log_filename
+        # Save to file only if verbose
+        if self.verbose:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_filename = f"http_request_{timestamp}.json"
+            log_path = project_root / log_filename
 
-        with open(log_path, "w", encoding="utf-8") as f:
-            json.dump(log_entry, f, indent=2, ensure_ascii=False)
+            with open(log_path, "w", encoding="utf-8") as f:
+                json.dump(log_entry, f, indent=2, ensure_ascii=False)
 
-        print(f"HTTP request details saved to: {log_filename}", file=sys.stderr)
+            print(f"HTTP request details saved to: {log_filename}", file=sys.stderr)
 
     def search(
         self,
@@ -278,9 +278,9 @@ class LLMClient:
         if engine_type is not None:
             payload["engineType"] = engine_type
 
-        # Add all METASO_* environment variables to payload (only if not already set)
-        env_payload = self._get_metaso_env_payload()
-        for key, value in env_payload.items():
+        # Add Metaso parameters from config (only if not already set by method arguments)
+        config_payload = self._get_metaso_config_payload()
+        for key, value in config_payload.items():
             if key not in payload:
                 payload[key] = value
 
@@ -295,6 +295,9 @@ class LLMClient:
         elif self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
+        # Log request details before sending (always log endpoint and payload)
+        self._log_request_details("POST", self.api_url, headers, payload, None)
+
         response = httpx.post(
             self.api_url,
             headers=headers,
@@ -303,8 +306,20 @@ class LLMClient:
         )
         response.raise_for_status()
 
-        # Log request details if verbose
-        self._log_request_details("POST", self.api_url, headers, payload, response)
+        # Log response status if verbose
+        if self.verbose:
+            print(f"\nResponse Status: {response.status_code}", file=sys.stderr)
+            try:
+                response_body = response.text
+                if len(response_body) > 1000:
+                    response_body_preview = response_body[:1000] + f"\n... (truncated, total length: {len(response_body)} chars)"
+                else:
+                    response_body_preview = response_body
+                print(f"Response Body Preview:", file=sys.stderr)
+                print(response_body_preview, file=sys.stderr)
+            except Exception:
+                print("[Response body not available]", file=sys.stderr)
+            print("="*80 + "\n", file=sys.stderr)
 
         return response.json()
 
@@ -354,9 +369,9 @@ class LLMClient:
         if engine_type is not None:
             payload["engineType"] = engine_type
 
-        # Add all METASO_* environment variables to payload (only if not already set)
-        env_payload = self._get_metaso_env_payload()
-        for key, value in env_payload.items():
+        # Add Metaso parameters from config (only if not already set by method arguments)
+        config_payload = self._get_metaso_config_payload()
+        for key, value in config_payload.items():
             if key not in payload:
                 payload[key] = value
 
@@ -372,16 +387,25 @@ class LLMClient:
         elif self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
+        # Log request details before sending (always log endpoint and payload)
+        self._log_request_details("POST", self.api_url, headers, payload, None)
+
         with httpx.stream("POST", self.api_url, headers=headers, json=payload, timeout=300.0) as response:
             response.raise_for_status()
 
-            # Log request details if verbose (for streaming, log after connection established)
+            # Log response status if verbose (for streaming, log after connection established)
             if self.verbose:
-                self._log_request_details("POST", self.api_url, headers, payload, response)
+                # Only log response status to avoid duplicate request info
+                print(f"\nResponse Status: {response.status_code}", file=sys.stderr)
+                print("="*80 + "\n", file=sys.stderr)
 
             for line in response.iter_lines():
                 if not line.strip():
                     continue
+
+                # Handle SSE format (data: {...})
+                if line.startswith("data: "):
+                    line = line[6:]  # Remove "data: " prefix
 
                 # Handle [DONE] marker
                 if line.strip() == "[DONE]":
@@ -394,6 +418,13 @@ class LLMClient:
                         continue
                     yield data
                 except json.JSONDecodeError:
+                    # If JSON parsing fails, try to see if it's a plain text error
+                    if line.strip().startswith("ERROR:"):
+                        yield {
+                            "type": "error",
+                            "msg": line.strip(),
+                            "code": None
+                        }
                     continue
 
     def stream_completion(
@@ -440,12 +471,17 @@ class LLMClient:
             "Content-Type": "application/json",
         }
 
+        # Log request details before sending (always log endpoint and payload)
+        self._log_request_details("POST", self.api_url, headers, payload, None)
+
         with httpx.stream("POST", self.api_url, headers=headers, json=payload, timeout=60.0) as response:
             response.raise_for_status()
 
-            # Log request details if verbose (for streaming, log after connection established)
+            # Log response status if verbose (for streaming, log after connection established)
             if self.verbose:
-                self._log_request_details("POST", self.api_url, headers, payload, response)
+                print(f"\nResponse Status: {response.status_code}", file=sys.stderr)
+                print("[Streaming response - body consumed as event stream]", file=sys.stderr)
+                print("="*80 + "\n", file=sys.stderr)
 
             for line in response.iter_lines():
                 if not line.strip():

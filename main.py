@@ -1,6 +1,7 @@
 """Main CLI entry point for Metaso search API and OpenAI compatible chat completion."""
 import sys
 import os
+import json
 import argparse
 from pathlib import Path
 from datetime import datetime
@@ -11,6 +12,51 @@ from llm_client import LLMClient
 # Load .env file from project root
 project_root = Path(__file__).parent
 load_dotenv(dotenv_path=project_root / ".env")
+
+
+def load_api_configs():
+    """
+    Load API/model configurations from JSON file.
+
+    Returns:
+        List of API configuration dictionaries
+    """
+    config_file = project_root / "api_configs.json"
+
+    # Default configurations if file doesn't exist
+    default_configs = [
+        {
+            "id": "metaso-default",
+            "name": "Metaso Search",
+            "api_url": os.getenv("LLM_API_URL", "https://metaso.cn/api/open/search"),
+            "model": None,
+            "api_type": "metaso",
+            "api_key_name": "METASO_API_KEY"
+        },
+        {
+            "id": "openai-gpt35",
+            "name": "OpenAI GPT-3.5 Turbo",
+            "api_url": os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions"),
+            "model": "gpt-3.5-turbo",
+            "api_type": "openai",
+            "api_key_name": "OPENAI_API_KEY"
+        },
+    ]
+
+    if not config_file.exists():
+        return default_configs
+
+    try:
+        with open(config_file, 'r', encoding='utf-8') as f:
+            configs = json.load(f)
+
+        if not isinstance(configs, list):
+            return default_configs
+
+        return configs
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Warning: Failed to load api_configs.json: {e}. Using default configurations.", file=sys.stderr)
+        return default_configs
 
 
 def save_response(text: str, output_path: Optional[str] = None, api_type: str = "metaso") -> str:
@@ -108,6 +154,10 @@ def main():
         type=float,
         help="Temperature parameter for API calls (float value)"
     )
+    parser.add_argument(
+        "-c", "--config",
+        help="API configuration ID from api_configs.json (default: first available config)"
+    )
 
     args = parser.parse_args()
 
@@ -130,26 +180,60 @@ def main():
                 sys.exit(1)
 
     try:
-        # Initialize client (API type auto-detected from URL)
-        client = LLMClient(verbose=args.verbose)
+        # Load API configurations
+        api_configs = load_api_configs()
+
+        # Find the configuration by ID or use first available
+        api_config = None
+        if args.config:
+            for config in api_configs:
+                if config.get('id') == args.config:
+                    api_config = config
+                    break
+            if not api_config:
+                print(f"Error: Configuration '{args.config}' not found.", file=sys.stderr)
+                sys.exit(1)
+        else:
+            # Use first available config
+            if not api_configs:
+                print("Error: No API configuration available.", file=sys.stderr)
+                sys.exit(1)
+            api_config = api_configs[0]
+
+        # Extract configuration values
+        api_url = api_config.get('api_url')
+        model = api_config.get('model')
+        api_key_name = api_config.get('api_key_name')
+        metaso_params = api_config.get('metaso_params', {})
+        openai_params = api_config.get('openai_params', {})
+
+        # Initialize client
+        client = LLMClient(
+            api_url=api_url,
+            model=model if model else None,
+            api_key_name=api_key_name,
+            verbose=args.verbose,
+            metaso_params=metaso_params,
+            openai_params=openai_params
+        )
 
         # Get response based on API type
         if client.api_type == "metaso":
             print("Calling Metaso API...", file=sys.stderr)
 
-            # Get Metaso settings from environment variables
-            lang = os.getenv("METASO_LANG")  # "zh" or "en", optional
-            session_id = os.getenv("METASO_SESSION_ID")
-            if session_id:
+            # Get Metaso settings from config
+            lang = metaso_params.get('lang')
+            session_id = metaso_params.get('session_id')
+            if session_id is not None:
                 try:
                     session_id = int(session_id)
-                except ValueError:
+                except (ValueError, TypeError):
                     session_id = None
-            third_party_uid = os.getenv("METASO_THIRD_PARTY_UID")
-            stream = os.getenv("METASO_STREAM", "true").lower() in ("true", "1", "yes")
-            enable_mix = os.getenv("METASO_ENABLE_MIX", "false").lower() in ("true", "1", "yes")
-            enable_image = os.getenv("METASO_ENABLE_IMAGE", "false").lower() in ("true", "1", "yes")
-            engine_type = os.getenv("METASO_ENGINE_TYPE")  # "" for web, "pdf" for library
+            third_party_uid = metaso_params.get('third_party_uid')
+            stream = True  # Default to streaming for CLI
+            enable_mix = metaso_params.get('enable_mix', False)
+            enable_image = metaso_params.get('enable_image', False)
+            engine_type = metaso_params.get('engine_type')
 
             if stream:
                 # Streaming mode
@@ -211,14 +295,9 @@ def main():
         else:  # openai
             print("Calling OpenAI API...", file=sys.stderr)
 
-            # Get OpenAI settings from environment variables
-            temperature = 0.7 # default 0.7
-            if os.getenv("LLM_TEMPERATURE"):
-                try:
-                    temperature = float(os.getenv("LLM_TEMPERATURE"))
-                except ValueError:
-                    print("Warning: Invalid LLM_TEMPERATURE value, using default 0.7", file=sys.stderr)
-                    temperature = 0.7
+            # Get OpenAI settings from config
+            default_temperature = api_config.get('default_temperature')
+            temperature = default_temperature if default_temperature is not None else 0.7
 
             if args.temperature:
                 try:
@@ -230,15 +309,15 @@ def main():
                 except ValueError:
                     print(f"Warning: Invalid temperature value, using {temperature}", file=sys.stderr)
 
-            max_tokens = None
-            if os.getenv("LLM_MAX_TOKENS"):
+            max_tokens = openai_params.get('max_tokens')
+            if max_tokens is not None:
                 try:
-                    max_tokens = int(os.getenv("LLM_MAX_TOKENS"))
-                except ValueError:
-                    print("Warning: Invalid LLM_MAX_TOKENS value, ignoring", file=sys.stderr)
+                    max_tokens = int(max_tokens)
+                except (ValueError, TypeError):
+                    max_tokens = None
 
-            system_prompt = os.getenv("LLM_SYSTEM_PROMPT")
-            no_stream = os.getenv("LLM_NO_STREAM", "false").lower() in ("true", "1", "yes")
+            system_prompt = openai_params.get('system_prompt')
+            no_stream = False  # Default to streaming for CLI
 
             if no_stream:
                 # Non-streaming mode
