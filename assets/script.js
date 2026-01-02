@@ -1,367 +1,401 @@
-let history = JSON.parse(localStorage.getItem('llm_history') || '[]');
-let currentTemplateName = null;
-let templateHasInput2 = false;
-let templateHasInput3 = false;
+// 全局状态
 let apiConfigs = [];
-let currentApiConfig = null;
+let templates = [];
+let tabs = []; // [{ templateName, tabId, history }]
+let activeTabId = null;
+let tabCounter = 0;
 
-// Load API configurations on page load
+// 从 localStorage 加载历史记录（按模板分组）
+function loadHistoryFromStorage() {
+    const stored = localStorage.getItem('llm_history');
+    if (!stored) return {};
+
+    try {
+        const allHistory = JSON.parse(stored);
+        // 按模板分组历史记录
+        const historyByTemplate = {};
+        allHistory.forEach(item => {
+            const templateName = item.template_name || 'default';
+            if (!historyByTemplate[templateName]) {
+                historyByTemplate[templateName] = [];
+            }
+            historyByTemplate[templateName].push(item);
+        });
+        return historyByTemplate;
+    } catch (e) {
+        console.error('Failed to load history:', e);
+        return {};
+    }
+}
+
+// 保存历史记录到 localStorage
+function saveHistoryToStorage() {
+    const allHistory = [];
+    tabs.forEach(tab => {
+        if (tab.history) {
+            allHistory.push(...tab.history);
+        }
+    });
+    // 保持最后 100 条记录
+    allHistory.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    const limited = allHistory.slice(0, 100);
+    localStorage.setItem('llm_history', JSON.stringify(limited));
+}
+
+// 加载 API 配置
 async function loadApiConfigs() {
     try {
         const response = await fetch('/api/configs');
         const data = await response.json();
         apiConfigs = data.configs || [];
-        const select = document.getElementById('apiConfig');
-
-        // Clear existing options
-        select.innerHTML = '';
-
-        if (apiConfigs.length === 0) {
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = '-- No configurations available --';
-            select.appendChild(option);
-            return;
-        }
-
-        // Add options for each configuration
-        apiConfigs.forEach((config, index) => {
-            const option = document.createElement('option');
-            option.value = index;
-            option.textContent = config.name;
-            select.appendChild(option);
-        });
-
-        // Set default selection (first one)
-        if (apiConfigs.length > 0) {
-            select.value = '0';
-            currentApiConfig = apiConfigs[0];
-        }
+        return apiConfigs;
     } catch (error) {
         console.error('Failed to load API configurations:', error);
-        const select = document.getElementById('apiConfig');
-        select.innerHTML = '<option value="">-- Error loading configurations --</option>';
+        return [];
     }
 }
 
-// Handle API config selection change
-function setupApiConfigSelector() {
-    const apiConfigSelect = document.getElementById('apiConfig');
-    if (apiConfigSelect) {
-        apiConfigSelect.addEventListener('change', (e) => {
-            const index = parseInt(e.target.value);
-            if (!isNaN(index) && index >= 0 && index < apiConfigs.length) {
-                currentApiConfig = apiConfigs[index];
-            } else {
-                currentApiConfig = null;
-            }
-        });
-    }
-}
-
-// Load templates on page load
+// 加载模板列表
 async function loadTemplates() {
     try {
         const response = await fetch('/api/templates');
         const data = await response.json();
-        const select = document.getElementById('template');
-
-        // Clear existing options except the first one
-        while (select.options.length > 1) {
-            select.remove(1);
-        }
-
-        data.templates.forEach(template => {
-            const option = document.createElement('option');
-            option.value = template;
-            option.textContent = template;
-            select.appendChild(option);
-        });
+        templates = data.templates || [];
+        return templates;
     } catch (error) {
         console.error('Failed to load templates:', error);
+        return [];
     }
 }
 
-// Load selected template
-async function loadTemplate() {
-    const templateName = document.getElementById('template').value;
-    const previewDiv = document.getElementById('templatePreview');
-
-    if (!templateName) {
-        currentTemplateName = null;
-        templateHasInput2 = false;
-        templateHasInput3 = false;
-        document.getElementById('inputTextGroup').style.display = 'none';
-        document.getElementById('inputText2Group').style.display = 'none';
-        document.getElementById('inputText3Group').style.display = 'none';
-        document.getElementById('inputText').value = '';
-        document.getElementById('inputText2').value = '';
-        document.getElementById('inputText3').value = '';
-        previewDiv.style.display = 'none';
-        return;
-    }
-
+// 加载模板内容
+async function loadTemplateContent(templateName) {
     try {
         const response = await fetch(`/api/templates/${templateName}`);
         if (!response.ok) {
             throw new Error('Failed to load template');
         }
-
         const data = await response.json();
-        currentTemplateName = templateName;
-        templateHasInput2 = data.content.includes('{input2_txt}');
-        templateHasInput3 = data.content.includes('{input3_txt}');
+        return data.content;
+    } catch (error) {
+        console.error('Failed to load template content:', error);
+        return null;
+    }
+}
 
-        // Display template preview with highlighted placeholders
-        const templateContent = data.content;
+// 创建新标签页
+function createTab(templateName) {
+    const tabId = `tab-${tabCounter++}`;
+    const tab = {
+        templateName,
+        tabId,
+        history: []
+    };
+
+    tabs.push(tab);
+
+    // 从存储中加载该模板的历史记录
+    const historyByTemplate = loadHistoryFromStorage();
+    if (historyByTemplate[templateName]) {
+        tab.history = historyByTemplate[templateName];
+    }
+
+    // 创建标签按钮
+    const tabButton = document.createElement('button');
+    tabButton.className = 'tab-button';
+    tabButton.dataset.tabId = tabId;
+    tabButton.innerHTML = `
+        <span>${templateName}</span>
+        <span class="close-btn" onclick="event.stopPropagation(); closeTab('${tabId}')">×</span>
+    `;
+    tabButton.addEventListener('click', () => switchTab(tabId));
+
+    const tabsHeader = document.getElementById('tabsHeader');
+    tabsHeader.appendChild(tabButton);
+
+    // 创建标签内容
+    const tabTemplate = document.getElementById('tabTemplate');
+    const tabContent = tabTemplate.content.cloneNode(true).querySelector('.tab-content');
+    tabContent.dataset.tabId = tabId;
+    tabContent.dataset.templateName = templateName;
+
+    const tabsContent = document.getElementById('tabsContent');
+    tabsContent.appendChild(tabContent);
+
+    // 初始化标签页内容
+    initializeTabContent(tabId, templateName);
+
+    // 切换到新标签页
+    switchTab(tabId);
+
+    return tabId;
+}
+
+// 初始化标签页内容
+async function initializeTabContent(tabId, templateName) {
+    const tabContent = document.querySelector(`.tab-content[data-tab-id="${tabId}"]`);
+    if (!tabContent) return;
+
+    // 设置模板名称显示
+    const templateNameDisplay = tabContent.querySelector('.template-name-display');
+    templateNameDisplay.textContent = templateName;
+
+    // 加载模板内容并显示预览
+    const templateContent = await loadTemplateContent(templateName);
+    if (templateContent) {
+        const templatePreview = tabContent.querySelector('.template-preview');
         const highlightedContent = templateContent
             .replace(/\{input_txt\}/g, '<span class="template-preview-placeholder">{input_txt}</span>')
             .replace(/\{input2_txt\}/g, '<span class="template-preview-placeholder">{input2_txt}</span>')
             .replace(/\{input3_txt\}/g, '<span class="template-preview-placeholder">{input3_txt}</span>');
+        templatePreview.innerHTML = highlightedContent;
+        templatePreview.style.display = 'block';
 
-        previewDiv.innerHTML = highlightedContent;
-        previewDiv.style.display = 'block';
+        // 检查是否需要显示 input2 和 input3
+        const hasInput2 = templateContent.includes('{input2_txt}');
+        const hasInput3 = templateContent.includes('{input3_txt}');
+        tabContent.querySelector('.inputText2Group').style.display = hasInput2 ? 'block' : 'none';
+        tabContent.querySelector('.inputText3Group').style.display = hasInput3 ? 'block' : 'none';
+    }
 
-        // Always show input text field when template is loaded
-        document.getElementById('inputTextGroup').style.display = 'block';
-        document.getElementById('inputText2Group').style.display = templateHasInput2 ? 'block' : 'none';
-        document.getElementById('inputText3Group').style.display = templateHasInput3 ? 'block' : 'none';
-        document.getElementById('inputText').focus();
-    } catch (error) {
-        alert(`Error loading template: ${error.message}`);
-        currentTemplateName = null;
-        templateHasInput2 = false;
-        templateHasInput3 = false;
-        document.getElementById('inputTextGroup').style.display = 'none';
-        document.getElementById('inputText2Group').style.display = 'none';
-        document.getElementById('inputText3Group').style.display = 'none';
-        previewDiv.style.display = 'none';
+    // 填充 API 配置选择器
+    const apiConfigSelect = tabContent.querySelector('.apiConfig');
+    apiConfigSelect.innerHTML = '';
+    apiConfigs.forEach((config, index) => {
+        const option = document.createElement('option');
+        option.value = index;
+        option.textContent = config.name;
+        apiConfigSelect.appendChild(option);
+    });
+    if (apiConfigs.length > 0) {
+        apiConfigSelect.value = '0';
+    }
+
+    // 设置温度滑块事件
+    const temperatureSlider = tabContent.querySelector('.temperature');
+    const temperatureValue = tabContent.querySelector('.temperature-value');
+    temperatureSlider.addEventListener('input', (e) => {
+        temperatureValue.textContent = parseFloat(e.target.value).toFixed(1);
+    });
+
+    // 设置提交按钮事件
+    const submitBtn = tabContent.querySelector('.submitBtn');
+    submitBtn.addEventListener('click', () => submitPrompt(tabId));
+
+    // 设置输入框 Enter 键事件
+    const inputText = tabContent.querySelector('.inputText');
+    inputText.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            submitPrompt(tabId);
+        }
+    });
+
+    // 加载历史记录
+    loadTabHistory(tabId);
+}
+
+// 切换标签页
+function switchTab(tabId) {
+    activeTabId = tabId;
+
+    // 更新标签按钮状态
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tabId === tabId);
+    });
+
+    // 更新标签内容显示
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.toggle('active', content.dataset.tabId === tabId);
+    });
+}
+
+// 关闭标签页
+function closeTab(tabId) {
+    const tabIndex = tabs.findIndex(t => t.tabId === tabId);
+    if (tabIndex === -1) return;
+
+    // 如果只有一个标签页，不允许关闭
+    if (tabs.length <= 1) {
+        alert('至少需要保留一个标签页');
+        return;
+    }
+
+    // 保存该标签页的历史记录
+    saveHistoryToStorage();
+
+    // 移除标签按钮
+    const tabButton = document.querySelector(`.tab-button[data-tab-id="${tabId}"]`);
+    if (tabButton) tabButton.remove();
+
+    // 移除标签内容
+    const tabContent = document.querySelector(`.tab-content[data-tab-id="${tabId}"]`);
+    if (tabContent) tabContent.remove();
+
+    // 从 tabs 数组中移除
+    tabs.splice(tabIndex, 1);
+
+    // 如果关闭的是当前活动标签页，切换到第一个标签页
+    if (activeTabId === tabId && tabs.length > 0) {
+        switchTab(tabs[0].tabId);
     }
 }
 
-// Update temperature display
-document.getElementById('temperature').addEventListener('input', (e) => {
-    document.getElementById('tempValue').textContent = parseFloat(e.target.value).toFixed(1);
-});
+// 加载标签页历史记录
+function loadTabHistory(tabId) {
+    const tab = tabs.find(t => t.tabId === tabId);
+    if (!tab) return;
 
-// Auto-load template when dropdown changes
-document.getElementById('template').addEventListener('change', (e) => {
-    if (!e.target.value) {
-        currentTemplateName = null;
-        templateHasInput2 = false;
-        templateHasInput3 = false;
-        document.getElementById('inputTextGroup').style.display = 'none';
-        document.getElementById('inputText2Group').style.display = 'none';
-        document.getElementById('inputText3Group').style.display = 'none';
-        document.getElementById('inputText').value = '';
-        document.getElementById('inputText2').value = '';
-        document.getElementById('inputText3').value = '';
-        document.getElementById('templatePreview').style.display = 'none';
-    } else {
-        // Auto-load the selected template
-        loadTemplate();
-    }
-});
+    const tabContent = document.querySelector(`.tab-content[data-tab-id="${tabId}"]`);
+    if (!tabContent) return;
 
-// Load history on page load
-function loadHistory() {
-    const historyDiv = document.getElementById('history');
+    const historyDiv = tabContent.querySelector('.history');
+    const history = tab.history || [];
+
     if (history.length === 0) {
-        historyDiv.innerHTML = '<p style="color: #999; font-style: italic;">No history yet</p>';
+        historyDiv.innerHTML = '<p style="color: #999; font-style: italic;">暂无历史记录</p>';
         return;
     }
 
     historyDiv.innerHTML = history.map((item, index) => {
-        // Find config name from config_id
         let apiInfo = '';
         if (item.config_id) {
             const config = apiConfigs.find(c => c.id === item.config_id);
             if (config) {
                 apiInfo = ` • API: ${config.name}`;
             }
-        } else if (item.api_config) {
-            // Fallback for old format
-            apiInfo = ` • API: ${item.api_config.name}`;
         }
+
         return `
         <div class="history-item">
             <div class="history-item-header">
-                <div style="flex: 1;" onclick="loadHistoryItem(${index})">
-                    <div class="history-prompt">${escapeHtml(item.prompt)}</div>
-                    <div class="history-response">${escapeHtml(item.response.substring(0, 150))}${item.response.length > 150 ? '...' : ''}</div>
-                    <div class="history-meta">Temp: ${item.temperature}${apiInfo} • ${new Date(item.timestamp).toLocaleString()}</div>
+                <div style="flex: 1;" onclick="loadHistoryItem('${tabId}', ${index})">
+                    <div class="history-prompt">${escapeHtml(item.prompt || item.input_texts?.join(' | ') || '')}</div>
+                    <div class="history-response">${escapeHtml((item.response || '').substring(0, 150))}${(item.response || '').length > 150 ? '...' : ''}</div>
+                    <div class="history-meta">Temp: ${item.temperature || 0.7}${apiInfo} • ${new Date(item.timestamp).toLocaleString()}</div>
                 </div>
-                <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem(${index})" title="Delete">×</button>
+                <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem('${tabId}', ${index})" title="删除">×</button>
             </div>
         </div>
     `;
     }).join('');
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// 加载历史记录项
+async function loadHistoryItem(tabId, index) {
+    const tab = tabs.find(t => t.tabId === tabId);
+    if (!tab || !tab.history || index >= tab.history.length) return;
 
-function deleteHistoryItem(index) {
-    if (confirm('Are you sure you want to delete this history item?')) {
-        history.splice(index, 1);
-        localStorage.setItem('llm_history', JSON.stringify(history));
-        loadHistory();
-    }
-}
+    const item = tab.history[index];
+    const tabContent = document.querySelector(`.tab-content[data-tab-id="${tabId}"]`);
+    if (!tabContent) return;
 
-async function loadHistoryItem(index) {
-    const item = history[index];
-
-    // Load API configuration from history
+    // 加载 API 配置
     if (item.config_id) {
-        // New format: find config by ID
         const configIndex = apiConfigs.findIndex(config => config.id === item.config_id);
         if (configIndex >= 0) {
-            document.getElementById('apiConfig').value = configIndex;
-            currentApiConfig = apiConfigs[configIndex];
-        }
-    } else if (item.api_config) {
-        // Fallback for old format: try to find matching config
-        // Try exact match first (api_url, model, and api_key_name)
-        const exactMatch = apiConfigs.findIndex(config =>
-            config.api_url === item.api_config.api_url &&
-            config.model === item.api_config.model &&
-            (config.api_key_name || null) === (item.api_config.api_key_name || null)
-        );
-        if (exactMatch >= 0) {
-            document.getElementById('apiConfig').value = exactMatch;
-            currentApiConfig = apiConfigs[exactMatch];
-        } else {
-            // If exact match not found, try match by api_url and model only
-            const matchingIndex = apiConfigs.findIndex(config =>
-                config.api_url === item.api_config.api_url &&
-                config.model === item.api_config.model
-            );
-            if (matchingIndex >= 0) {
-                document.getElementById('apiConfig').value = matchingIndex;
-                currentApiConfig = apiConfigs[matchingIndex];
-            } else {
-                // If still not found, try to find by name or use first available
-                const nameMatch = apiConfigs.findIndex(config =>
-                    config.name === item.api_config.name
-                );
-                if (nameMatch >= 0) {
-                    document.getElementById('apiConfig').value = nameMatch;
-                    currentApiConfig = apiConfigs[nameMatch];
-                }
-            }
+            tabContent.querySelector('.apiConfig').value = configIndex;
         }
     }
 
-    // Load template and input text from history
-    if (item.template_name) {
-        // New format with template_name field
-        document.getElementById('template').value = item.template_name;
-        await loadTemplate();
-        let texts = item.input_texts || [];
-        if ((!texts || texts.length === 0) && item.input_text) {
-            // Fallback for older saved format with single input_text
-            texts = [item.input_text];
-        }
-        if ((!texts || texts.length === 0) && item.prompt) {
-            // Last resort: try parsing from prompt
-            const parsed = item.prompt.replace(/^\[Template: .+?\] /, '').split(' | ');
-            if (parsed.length > 0 && parsed[0].trim()) {
-                texts = parsed;
-            }
-        }
-        document.getElementById('inputText').value = texts[0] || '';
-        document.getElementById('inputText2').value = texts[1] || '';
-        document.getElementById('inputText3').value = texts[2] || '';
-    } else {
-        // Old format - try to parse from prompt string
-        const templateMatch = item.prompt.match(/^\[Template: (.+?)\]/);
-        if (templateMatch) {
-            const templateName = templateMatch[1];
-            document.getElementById('template').value = templateName;
-            await loadTemplate();
-            const inputText = item.prompt.replace(/^\[Template: .+?\] /, '');
-            document.getElementById('inputText').value = inputText;
-            document.getElementById('inputText2').value = '';
-            document.getElementById('inputText3').value = '';
-        } else {
-            alert('This history item does not have template information');
-            return;
-        }
+    // 加载输入文本
+    const inputTexts = item.input_texts || [];
+    if (inputTexts.length > 0) {
+        tabContent.querySelector('.inputText').value = inputTexts[0] || '';
+        tabContent.querySelector('.inputText2').value = inputTexts[1] || '';
+        tabContent.querySelector('.inputText3').value = inputTexts[2] || '';
     }
 
-    document.getElementById('temperature').value = item.temperature;
-    document.getElementById('tempValue').textContent = parseFloat(item.temperature).toFixed(1);
-    document.getElementById('response').textContent = item.response;
-    document.getElementById('response').classList.remove('loading');
-    document.getElementById('error').style.display = 'none';
+    // 加载温度
+    tabContent.querySelector('.temperature').value = item.temperature || 0.7;
+    tabContent.querySelector('.temperature-value').textContent = parseFloat(item.temperature || 0.7).toFixed(1);
+
+    // 显示响应
+    tabContent.querySelector('.response').textContent = item.response || '';
+    tabContent.querySelector('.response').classList.remove('loading');
+    tabContent.querySelector('.error').style.display = 'none';
 }
 
-async function submitPrompt() {
-    const temperature = parseFloat(document.getElementById('temperature').value);
-    const submitBtn = document.getElementById('submitBtn');
-    const responseDiv = document.getElementById('response');
-    const errorDiv = document.getElementById('error');
+// 删除历史记录项
+function deleteHistoryItem(tabId, index) {
+    if (!confirm('确定要删除这条历史记录吗？')) return;
 
-    // Require template selection
-    if (!currentTemplateName) {
-        alert('Please select and load a template first');
-        return;
-    }
+    const tab = tabs.find(t => t.tabId === tabId);
+    if (!tab || !tab.history || index >= tab.history.length) return;
 
-    // Collect inputs based on placeholders
-    const inputText1 = document.getElementById('inputText').value.trim();
-    const inputText2 = document.getElementById('inputText2').value.trim();
-    const inputText3 = document.getElementById('inputText3').value.trim();
+    tab.history.splice(index, 1);
+    saveHistoryToStorage();
+    loadTabHistory(tabId);
+}
+
+// 提交提示
+async function submitPrompt(tabId) {
+    const tab = tabs.find(t => t.tabId === tabId);
+    if (!tab) return;
+
+    const tabContent = document.querySelector(`.tab-content[data-tab-id="${tabId}"]`);
+    if (!tabContent) return;
+
+    const templateName = tab.templateName;
+    const temperature = parseFloat(tabContent.querySelector('.temperature').value);
+    const submitBtn = tabContent.querySelector('.submitBtn');
+    const responseDiv = tabContent.querySelector('.response');
+    const errorDiv = tabContent.querySelector('.error');
+
+    // 收集输入文本
+    const inputText1 = tabContent.querySelector('.inputText').value.trim();
+    const inputText2 = tabContent.querySelector('.inputText2').value.trim();
+    const inputText3 = tabContent.querySelector('.inputText3').value.trim();
 
     if (!inputText1) {
-        alert('Please enter input text');
+        alert('请输入输入文本');
         return;
     }
 
+    // 检查是否需要 input2 和 input3
+    const templateContent = await loadTemplateContent(templateName);
+    const hasInput2 = templateContent && templateContent.includes('{input2_txt}');
+    const hasInput3 = templateContent && templateContent.includes('{input3_txt}');
+
     const input_texts = [inputText1];
-    if (templateHasInput2) {
+    if (hasInput2) {
         if (!inputText2) {
-            alert('Please enter Input Text 2 (for {input2_txt})');
+            alert('请输入 Input Text 2 (用于 {input2_txt})');
             return;
         }
         input_texts.push(inputText2);
     }
-    if (templateHasInput3) {
+    if (hasInput3) {
         if (!inputText3) {
-            alert('Please enter Input Text 3 (for {input3_txt})');
+            alert('请输入 Input Text 3 (用于 {input3_txt})');
             return;
         }
-        // If template has input3 but not input2, ensure order; push empty second if needed
-        if (!templateHasInput2 && input_texts.length === 1) {
+        if (!hasInput2 && input_texts.length === 1) {
             input_texts.push(inputText1);
         }
         input_texts.push(inputText3);
     }
 
-    // Get selected API configuration
-    if (!currentApiConfig) {
-        alert('Please select an API & Model configuration');
+    // 获取选中的 API 配置
+    const apiConfigIndex = parseInt(tabContent.querySelector('.apiConfig').value);
+    if (isNaN(apiConfigIndex) || apiConfigIndex < 0 || apiConfigIndex >= apiConfigs.length) {
+        alert('请选择 API & Model 配置');
         return;
     }
+    const currentApiConfig = apiConfigs[apiConfigIndex];
 
-    // Prepare request payload with template and API config ID
+    // 准备请求
     const requestBody = {
         temperature,
-        template_name: currentTemplateName,
+        template_name: templateName,
         input_texts,
         config_id: currentApiConfig.id
     };
 
-    console.log('Submitting with:', requestBody);
-
     submitBtn.disabled = true;
     responseDiv.textContent = '';
     responseDiv.classList.add('loading');
-    responseDiv.textContent = 'Loading...';
+    responseDiv.textContent = '加载中...';
     errorDiv.style.display = 'none';
 
     try {
@@ -375,30 +409,27 @@ async function submitPrompt() {
 
         if (!response.ok) {
             const contentType = response.headers.get('content-type');
-            let errorMessage = 'Request failed';
+            let errorMessage = '请求失败';
 
             if (contentType && contentType.includes('application/json')) {
                 try {
                     const error = await response.json();
                     errorMessage = error.error || errorMessage;
                 } catch (e) {
-                    // If JSON parsing fails, fall through to text parsing
+                    // Ignore
                 }
             } else {
-                // If not JSON, try to read as text
                 try {
                     const text = await response.text();
-                    // Try to extract meaningful error from HTML or text
                     if (text.includes('<html>')) {
-                        // It's an HTML error page, extract title or h1 if available
                         const titleMatch = text.match(/<title>(.*?)<\/title>/i);
                         const h1Match = text.match(/<h1>(.*?)<\/h1>/i);
-                        errorMessage = titleMatch ? titleMatch[1] : (h1Match ? h1Match[1] : `Server error (${response.status})`);
+                        errorMessage = titleMatch ? titleMatch[1] : (h1Match ? h1Match[1] : `服务器错误 (${response.status})`);
                     } else {
-                        errorMessage = text || `Server error (${response.status})`;
+                        errorMessage = text || `服务器错误 (${response.status})`;
                     }
                 } catch (e) {
-                    errorMessage = `Server error (${response.status} ${response.statusText})`;
+                    errorMessage = `服务器错误 (${response.status} ${response.statusText})`;
                 }
             }
 
@@ -432,26 +463,31 @@ async function submitPrompt() {
             }
         }
 
-        // Save to history
+        // 保存到历史记录
         const historyItem = {
-            prompt: `[Template: ${currentTemplateName}] ${input_texts.join(' | ')}`,
+            prompt: `[Template: ${templateName}] ${input_texts.join(' | ')}`,
             response: fullResponse,
             temperature,
-            template_name: currentTemplateName,
+            template_name: templateName,
             input_texts,
             config_id: currentApiConfig ? currentApiConfig.id : null,
             timestamp: new Date().toISOString()
         };
-        history.unshift(historyItem);
-        // Keep only last 20 items
-        if (history.length > 20) {
-            history = history.slice(0, 20);
+
+        if (!tab.history) {
+            tab.history = [];
         }
-        localStorage.setItem('llm_history', JSON.stringify(history));
-        loadHistory();
+        tab.history.unshift(historyItem);
+        // 每个标签页最多保留 50 条记录
+        if (tab.history.length > 50) {
+            tab.history = tab.history.slice(0, 50);
+        }
+
+        saveHistoryToStorage();
+        loadTabHistory(tabId);
 
     } catch (error) {
-        errorDiv.textContent = `Error: ${error.message}`;
+        errorDiv.textContent = `错误: ${error.message}`;
         errorDiv.style.display = 'block';
         responseDiv.textContent = '';
         responseDiv.classList.remove('loading');
@@ -460,26 +496,76 @@ async function submitPrompt() {
     }
 }
 
-// Allow Enter key to submit in textarea (Shift+Enter for new line)
-document.getElementById('inputText').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        submitPrompt();
-    }
-});
-
-// Load API configs, templates and history on page load
-async function initializePage() {
-    await loadApiConfigs();
-    setupApiConfigSelector();
-    loadTemplates();
-    loadHistory();
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
-// Initialize when DOM is ready
+// 添加新标签页（从模板选择）
+function addNewTab(templateName) {
+    if (!templateName) return;
+
+    // 检查该模板是否已经打开
+    const existingTab = tabs.find(t => t.templateName === templateName);
+    if (existingTab) {
+        switchTab(existingTab.tabId);
+        // 重置选择器
+        document.getElementById('templateSelector').value = '';
+        return;
+    }
+
+    createTab(templateName);
+    // 重置选择器
+    document.getElementById('templateSelector').value = '';
+}
+
+// 初始化页面
+async function initializePage() {
+    // 加载 API 配置和模板
+    await loadApiConfigs();
+    await loadTemplates();
+
+    // 设置模板选择器
+    const templateSelector = document.getElementById('templateSelector');
+    templates.forEach(template => {
+        const option = document.createElement('option');
+        option.value = template;
+        option.textContent = template;
+        templateSelector.appendChild(option);
+    });
+
+    templateSelector.addEventListener('change', (e) => {
+        if (e.target.value) {
+            addNewTab(e.target.value);
+        }
+    });
+
+    // 从存储中加载历史记录，为有历史记录的模板创建标签页
+    const historyByTemplate = loadHistoryFromStorage();
+    const templatesWithHistory = Object.keys(historyByTemplate);
+
+    if (templatesWithHistory.length > 0) {
+        // 为有历史记录的模板创建标签页
+        templatesWithHistory.forEach(templateName => {
+            // 确保模板仍然存在
+            if (templates.includes(templateName)) {
+                createTab(templateName);
+            }
+        });
+    }
+
+    // 如果没有标签页被创建（没有历史记录），创建第一个模板的标签页
+    if (tabs.length === 0 && templates.length > 0) {
+        createTab(templates[0]);
+    } else if (templates.length === 0) {
+        alert('没有可用的模板');
+    }
+}
+
+// 页面加载完成后初始化
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializePage);
 } else {
     initializePage();
 }
-

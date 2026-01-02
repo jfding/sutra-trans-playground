@@ -10,61 +10,81 @@
     <div class="container">
         <h1>DeepSeek LLM Chat</h1>
 
-        <div class="input-section">
-            <div class="input-group">
-                <label for="apiConfig">API & Model</label>
-                <select id="apiConfig">
-                    <option value="">-- Loading configurations --</option>
+        <!-- 标签页栏 -->
+        <div class="tabs-container">
+            <div class="tabs-header" id="tabsHeader">
+                <!-- 标签页将通过 JavaScript 动态生成 -->
+            </div>
+            <div class="add-tab-container">
+                <select id="templateSelector" class="template-selector">
+                    <option value="">+ 添加标签页</option>
                 </select>
             </div>
-
-            <div class="input-group">
-                <label for="template">Template</label>
-                <div class="template-input-group">
-                    <select id="template">
-                        <option value="">-- Select a template --</option>
-                    </select>
-                    <button onclick="loadTemplate()" id="loadTemplateBtn">Load</button>
-                </div>
-                <div id="templatePreview" class="template-preview" style="display: none;"></div>
-            </div>
-
-            <div class="input-group" id="inputTextGroup">
-                <label for="inputText">Input Text</label>
-                <textarea id="inputText" placeholder="Enter text to replace {input_txt} in template..."></textarea>
-            </div>
-
-            <div class="input-group" id="inputText2Group" style="display: none;">
-                <label for="inputText2">Input Text 2</label>
-                <textarea id="inputText2" placeholder="Enter text to replace {input2_txt} in template..."></textarea>
-            </div>
-
-            <div class="input-group" id="inputText3Group" style="display: none;">
-                <label for="inputText3">Input Text 3</label>
-                <textarea id="inputText3" placeholder="Enter text to replace {input3_txt} in template..."></textarea>
-            </div>
-
-            <div class="input-group">
-                <label for="temperature">Temperature: <span class="temperature-value" id="tempValue">0.7</span></label>
-                <div class="temperature-control">
-                    <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
-                </div>
-            </div>
-
-            <button id="submitBtn" onclick="submitPrompt()">Send</button>
         </div>
 
-        <div class="response-section">
-            <label>Response</label>
-            <div id="response" class="response"></div>
-            <div id="error" class="error" style="display: none;"></div>
-        </div>
-
-        <div class="history-section">
-            <h2 style="font-size: 18px; margin-bottom: 16px;">History</h2>
-            <div id="history"></div>
+        <!-- 标签页内容区域 -->
+        <div class="tabs-content" id="tabsContent">
+            <!-- 每个标签页的内容将通过 JavaScript 动态生成 -->
         </div>
     </div>
+
+    <!-- 标签页模板（用于克隆） -->
+    <template id="tabTemplate">
+        <div class="tab-content" data-template-name="">
+            <div class="input-section">
+                <div class="input-group">
+                    <label>API & Model</label>
+                    <select class="apiConfig">
+                        <option value="">-- Loading configurations --</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>Temperature: <span class="temperature-value">0.7</span></label>
+                    <div class="temperature-control">
+                        <input type="range" class="temperature" min="0" max="2" step="0.1" value="0.7">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label>Template</label>
+                    <div class="template-preview-container">
+                        <div class="template-name-display"></div>
+                        <div class="template-preview" style="display: none;"></div>
+                    </div>
+                </div>
+
+                <div class="input-group inputTextGroup">
+                    <label>Input Text</label>
+                    <textarea class="inputText" placeholder="Enter text to replace {input_txt} in template..."></textarea>
+                </div>
+
+                <div class="input-group inputText2Group" style="display: none;">
+                    <label>Input Text 2</label>
+                    <textarea class="inputText2" placeholder="Enter text to replace {input2_txt} in template..."></textarea>
+                </div>
+
+                <div class="input-group inputText3Group" style="display: none;">
+                    <label>Input Text 3</label>
+                    <textarea class="inputText3" placeholder="Enter text to replace {input3_txt} in template..."></textarea>
+                </div>
+
+
+                <button class="submitBtn">Send</button>
+            </div>
+
+            <div class="response-section">
+                <label>Response</label>
+                <div class="response"></div>
+                <div class="error" style="display: none;"></div>
+            </div>
+
+            <div class="history-section">
+                <h2 style="font-size: 18px; margin-bottom: 16px;">History</h2>
+                <div class="history"></div>
+            </div>
+        </div>
+    </template>
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
