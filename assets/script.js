@@ -486,66 +486,19 @@ async function submitPrompt(tabId) {
             throw new Error(errorMessage);
         }
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let fullResponse = '';
-        let buffer = '';
-        let isDone = false;
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || ''; // 保留最后一个不完整的行
-
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const data = line.substring(6).trim();
-                    if (data === '[DONE]') {
-                        isDone = true;
-                        break;
-                    }
-                    if (data.startsWith('ERROR: ')) {
-                        throw new Error(data.substring(7));
-                    }
-                    fullResponse += data;
-                    responseDiv.textContent = fullResponse;
-                    responseDiv.classList.remove('loading');
-                }
-            }
-
-            if (isDone) break;
+        const data = await response.json();
+        
+        if (data.error) {
+            throw new Error(data.error);
         }
 
-        // 处理剩余的buffer
-        if (!isDone && buffer.trim()) {
-            const lines = buffer.split('\n');
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const data = line.substring(6).trim();
-                    if (data === '[DONE]') {
-                        isDone = true;
-                        break;
-                    }
-                    if (data.startsWith('ERROR: ')) {
-                        throw new Error(data.substring(7));
-                    }
-                    fullResponse += data;
-                    responseDiv.textContent = fullResponse;
-                    responseDiv.classList.remove('loading');
-                }
-            }
-        }
-
-        // 确保最终响应被显示
+        const fullResponse = data.response || '';
         responseDiv.textContent = fullResponse;
         responseDiv.classList.remove('loading');
 
         // 保存到历史记录
         const historyItem = {
-            prompt: `[Template: ${templateName}] ${input_texts.join(' | ')}`,
+            prompt: `[${templateName}] ${input_texts.join(' | ')}`,
             response: fullResponse,
             template_name: templateName,
             input_texts,

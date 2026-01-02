@@ -2,7 +2,7 @@
 import os
 import json
 import sys
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 from pathlib import Path
@@ -28,19 +28,10 @@ def load_api_configs():
     # Default configurations if file doesn't exist
     default_configs = [
         {
-            "id": "metaso-default",
-            "name": "Metaso Search",
-            "api_url": os.getenv("LLM_API_URL", "https://metaso.cn/api/open/search"),
-            "model": None,
-            "api_type": "metaso",
-            "api_key_name": "METASO_API_KEY"
-        },
-        {
             "id": "openai-gpt35",
             "name": "OpenAI GPT-3.5 Turbo",
             "api_url": os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions"),
             "model": "gpt-3.5-turbo",
-            "api_type": "openai",
             "api_key_name": "OPENAI_API_KEY"
         },
     ]
@@ -175,6 +166,8 @@ def chat():
         model = api_config.get('model')
         api_key_name = api_config.get('api_key_name')
         default_temperature = api_config.get('default_temperature')
+        extra_params = api_config.get('extra_params', {})
+        q_key = api_config.get('q_key')
 
         # Handle temperature: only if config has default_temperature field
         temperature = None
@@ -190,13 +183,6 @@ def chat():
             return jsonify({'error': 'api_url is required in config'}), 500
         if not api_key_name:
             return jsonify({'error': 'api_key_name is required in config'}), 500
-
-        # Determine if this is a Metaso API (doesn't use model parameter)
-        is_metaso = api_url and "metaso" in api_url.lower()
-
-        # For model: if None and it's Metaso, keep None; otherwise use default if None
-        if model is None and not is_metaso:
-            return jsonify({'error': 'Model is required for OpenAI API'}), 400
 
         # Handle template-based prompt or direct prompt
         template_name = data.get('template_name')
@@ -216,106 +202,29 @@ def chat():
         elif not prompt:
             return jsonify({'error': 'Either prompt or template_name with input_texts is required'}), 400
 
-        # Extract API-specific parameters from config
-        metaso_params = api_config.get('metaso_params', {})
-        openai_params = api_config.get('openai_params', {})
-
         # Create or get client with specified API URL, model, and api_key_name
-        # Use None for model if it's explicitly None (for Metaso), otherwise use the provided value or default
-        cache_key = f"{api_url}:{model or 'None'}:{api_key_name or 'default'}"
+        cache_key = f"{api_url}:{model or 'None'}"
         if cache_key not in client_cache:
-            # Pass model=None if it's None, otherwise pass the model string
             client_cache[cache_key] = LLMClient(
                 api_url=api_url,
-                model=model if model else None,
+                model=model,
                 api_key_name=api_key_name,
                 verbose=False,
-                metaso_params=metaso_params,
-                openai_params=openai_params
+                extra_params=extra_params,
+                q_key=q_key
             )
         llm_client = client_cache[cache_key]
 
-        # Check API type
-        if llm_client.api_type == "openai":
-            # OpenAI API - get parameters from config
-            system_prompt = openai_params.get('system_prompt')
-            max_tokens = openai_params.get('max_tokens')
-            if max_tokens is not None:
-                try:
-                    max_tokens = int(max_tokens)
-                except (ValueError, TypeError):
-                    max_tokens = None
-
-            # Stream the response
-            def generate():
-                try:
-                    for chunk in llm_client.stream_completion(
-                        prompt,
-                        system_prompt=system_prompt,
-                        temperature=temperature,  # None if config doesn't support temperature
-                        max_tokens=max_tokens
-                    ):
-                        yield f"data: {chunk}\n\n"
-                    yield "data: [DONE]\n\n"
-                except Exception as e:
-                    yield f"data: ERROR: {str(e)}\n\n"
-
-            return Response(generate(), mimetype='text/event-stream')
-        else:
-            # Metaso API - get parameters from config
-            lang = metaso_params.get('lang')
-            session_id = metaso_params.get('session_id')
-            if session_id is not None:
-                try:
-                    session_id = int(session_id)
-                except (ValueError, TypeError):
-                    session_id = None
-            third_party_uid = metaso_params.get('third_party_uid')
-            enable_mix = metaso_params.get('enable_mix', False)
-            enable_image = metaso_params.get('enable_image', False)
-            engine_type = metaso_params.get('engine_type')
-
-            def generate():
-                try:
-                    for message in llm_client.stream_search(
-                        prompt,
-                        lang=lang,
-                        session_id=session_id,
-                        third_party_uid=third_party_uid,
-                        enable_mix=enable_mix,
-                        enable_image=enable_image,
-                        engine_type=engine_type
-                    ):
-                        msg_type = message.get("type")
-                        if msg_type == "append-text":
-                            text = message.get("text", "")
-                            yield f"data: {text}\n\n"
-                        elif msg_type == "set-reference":
-                            # Format references for display
-                            ref_list = message.get("list", [])
-                            if ref_list:
-                                ref_text = "\n\nReferences:\n"
-                                for ref in ref_list:
-                                    title = ref.get("title", "")
-                                    link = ref.get("link", "")
-                                    index = ref.get("index", "")
-                                    ref_text += f"  [{index}] {title}\n    {link}\n"
-                                yield f"data: {ref_text}\n\n"
-                        elif msg_type == "query":
-                            # Optionally show keywords if available
-                            keywords = message.get("data", [])
-                            if keywords:
-                                keywords_text = f"Keywords: {', '.join(keywords)}\n\n"
-                                yield f"data: {keywords_text}\n\n"
-                        elif msg_type == "error":
-                            code = message.get("code")
-                            msg = message.get("msg", "Unknown error")
-                            yield f"data: ERROR: {msg} (code {code})\n\n"
-                    yield "data: [DONE]\n\n"
-                except Exception as e:
-                    yield f"data: ERROR: {str(e)}\n\n"
-
-            return Response(generate(), mimetype='text/event-stream')
+        try:
+            # Pass temperature if available
+            kwargs = {}
+            if temperature is not None:
+                kwargs['temperature'] = temperature
+            
+            response_text = llm_client.get_full_response(prompt, **kwargs)
+            return jsonify({'response': response_text})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500

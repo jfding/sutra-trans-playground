@@ -30,7 +30,6 @@ def load_api_configs():
             "name": "Metaso Search",
             "api_url": os.getenv("LLM_API_URL", "https://metaso.cn/api/open/search"),
             "model": None,
-            "api_type": "metaso",
             "api_key_name": "METASO_API_KEY"
         },
         {
@@ -38,7 +37,6 @@ def load_api_configs():
             "name": "OpenAI GPT-3.5 Turbo",
             "api_url": os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions"),
             "model": "gpt-3.5-turbo",
-            "api_type": "openai",
             "api_key_name": "OPENAI_API_KEY"
         },
     ]
@@ -59,14 +57,14 @@ def load_api_configs():
         return default_configs
 
 
-def save_response(text: str, output_path: Optional[str] = None, api_type: str = "metaso") -> str:
+def save_response(text: str, output_path: Optional[str] = None, api_url: Optional[str] = None) -> str:
     """
     Save response text to file.
 
     Args:
         text: Text to save
         output_path: Optional output file path. If not provided, generates timestamped filename.
-        api_type: API type for filename prefix
+        api_url: API URL for filename prefix (optional)
 
     Returns:
         Path to saved file
@@ -75,7 +73,11 @@ def save_response(text: str, output_path: Optional[str] = None, api_type: str = 
         filepath = Path(output_path)
     else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        prefix = "metaso" if api_type == "metaso" else "openai"
+        # Determine prefix from API URL if available
+        if api_url and "metaso" in api_url.lower():
+            prefix = "metaso"
+        else:
+            prefix = "api"
         filepath = Path(f"{prefix}_response_{timestamp}.txt")
 
     filepath.write_text(text, encoding="utf-8")
@@ -204,98 +206,55 @@ def main():
         api_url = api_config.get('api_url')
         model = api_config.get('model')
         api_key_name = api_config.get('api_key_name')
-        metaso_params = api_config.get('metaso_params', {})
-        openai_params = api_config.get('openai_params', {})
+        extra_params = api_config.get('extra_params', {})
+        q_key = api_config.get('q_key')
 
         # Initialize client
         client = LLMClient(
             api_url=api_url,
-            model=model if model else None,
+            model=model,
             api_key_name=api_key_name,
             verbose=args.verbose,
-            metaso_params=metaso_params,
-            openai_params=openai_params
+            extra_params=extra_params,
+            q_key=q_key
         )
 
-        # Get response based on API type
-        if client.api_type == "metaso":
-            print("Calling Metaso API...", file=sys.stderr)
+        # Determine API type: if q_key is defined, it's a search API (non-OpenAI compatible)
+        # Otherwise, it's OpenAI compatible mode (chat API)
+        is_search_api = q_key is not None
 
-            # Get Metaso settings from config
-            lang = metaso_params.get('lang')
-            session_id = metaso_params.get('session_id')
+        if is_search_api:
+            print("Calling Search API...", file=sys.stderr)
+
+            # Get search settings from config
+            lang = extra_params.get('lang')
+            session_id = extra_params.get('session_id')
             if session_id is not None:
                 try:
                     session_id = int(session_id)
                 except (ValueError, TypeError):
                     session_id = None
-            third_party_uid = metaso_params.get('third_party_uid')
-            stream = True  # Default to streaming for CLI
-            enable_mix = metaso_params.get('enable_mix', False)
-            enable_image = metaso_params.get('enable_image', False)
-            engine_type = metaso_params.get('engine_type')
+            third_party_uid = extra_params.get('third_party_uid')
+            enable_mix = extra_params.get('enable_mix', False)
+            enable_image = extra_params.get('enable_image', False)
+            engine_type = extra_params.get('engine_type')
 
-            if stream:
-                # Streaming mode
-                response_text = ""
-                for message in client.stream_search(
-                    query,
-                    lang=lang,
-                    session_id=session_id,
-                    third_party_uid=third_party_uid,
-                    enable_mix=enable_mix,
-                    enable_image=enable_image,
-                    engine_type=engine_type
-                ):
-                    msg_type = message.get("type")
+            # Non-streaming mode
+            response_text = client.get_full_response(
+                query,
+                lang=lang,
+                session_id=session_id,
+                third_party_uid=third_party_uid,
+                enable_mix=enable_mix,
+                enable_image=enable_image,
+                engine_type=engine_type,
+                save_raw_json=args.save_raw_json
+            )
+            print(response_text)
+        else:  # chat API
+            print("Calling Chat API...", file=sys.stderr)
 
-                    if msg_type == "query":
-                        keywords = message.get("data", [])
-                        if keywords:
-                            print(f"Keywords: {', '.join(keywords)}", file=sys.stderr)
-
-                    elif msg_type == "set-reference":
-                        ref_list = message.get("list", [])
-                        if ref_list:
-                            print("\nReferences:", file=sys.stderr)
-                            for ref in ref_list:
-                                title = ref.get("title", "")
-                                link = ref.get("link", "")
-                                index = ref.get("index", "")
-                                print(f"  [{index}] {title}", file=sys.stderr)
-                                print(f"    {link}", file=sys.stderr)
-                            print("", file=sys.stderr)
-
-                    elif msg_type == "append-text":
-                        text = message.get("text", "")
-                        print(text, end="", flush=True)
-                        response_text += text
-
-                    elif msg_type == "error":
-                        code = message.get("code")
-                        msg = message.get("msg", "Unknown error")
-                        print(f"\nError (code {code}): {msg}", file=sys.stderr)
-                        sys.exit(1)
-
-                print()  # Newline after streaming
-            else:
-                # Non-streaming mode
-                response_text = client.get_full_response(
-                    query,
-                    lang=lang,
-                    session_id=session_id,
-                    third_party_uid=third_party_uid,
-                    stream=False,
-                    enable_mix=enable_mix,
-                    enable_image=enable_image,
-                    engine_type=engine_type,
-                    save_raw_json=args.save_raw_json
-                )
-                print(response_text)
-        else:  # openai
-            print("Calling OpenAI API...", file=sys.stderr)
-
-            # Get OpenAI settings from config
+            # Get chat settings from config
             default_temperature = api_config.get('default_temperature')
             temperature = default_temperature if default_temperature is not None else 0.7
 
@@ -309,40 +268,26 @@ def main():
                 except ValueError:
                     print(f"Warning: Invalid temperature value, using {temperature}", file=sys.stderr)
 
-            max_tokens = openai_params.get('max_tokens')
+            max_tokens = extra_params.get('max_tokens')
             if max_tokens is not None:
                 try:
                     max_tokens = int(max_tokens)
                 except (ValueError, TypeError):
                     max_tokens = None
 
-            system_prompt = openai_params.get('system_prompt')
-            no_stream = False  # Default to streaming for CLI
+            system_prompt = extra_params.get('system_prompt')
 
-            if no_stream:
-                # Non-streaming mode
-                response_text = client.get_full_response(
-                    query,
-                    system_prompt=system_prompt,
-                    temperature=temperature,
-                    max_tokens=max_tokens
-                )
-                print(response_text)
-            else:
-                # Streaming mode
-                response_text = ""
-                for chunk in client.stream_completion(
-                    query,
-                    system_prompt=system_prompt,
-                    temperature=temperature,
-                    max_tokens=max_tokens
-                ):
-                    print(chunk, end="", flush=True)
-                    response_text += chunk
-                print()  # Newline after streaming
+            # Non-streaming mode
+            response_text = client.get_full_response(
+                query,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            print(response_text)
 
         # Save to file
-        output_path = save_response(response_text, args.output, client.api_type)
+        output_path = save_response(response_text, args.output, api_url)
         print(f"\nResponse saved to: {output_path}", file=sys.stderr)
 
     except Exception as e:

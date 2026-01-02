@@ -3,32 +3,31 @@
         "id": "metaso-internal",
         "name": "秘塔 内测API",
         "api_url": "https://metaso.cn/api/open/search",
-        "model": null,
-        "api_type": "metaso",
         "api_key_name": "METASO_API_KEY",
-        "metaso_params": {
-            "lang": null,
-            "session_id": null,
-            "third_party_uid": null,
-            "enable_mix": false,
-            "enable_image": false,
-            "engine_type": null
+        "q_key": "question",
+        "extra_params": {
+            "lang": "zh",
+            "stream": false,
+            "model": "ds-v3.2",
+            "sessionId": null,
+            "thirdPartyUid": null,
+            "enableMix": false,
+            "enableImage": false,
+            "engineType": "pdf",
+            "mode": "simple"
         }
     },
     {
         "id": "metaso-public",
         "name": "秘塔 公开API",
         "api_url": "https://metaso.cn/api/v1/chat/completions",
-        "model": "fast_thinking",
-        "api_type": "metaso",
         "api_key_name": "METASO_API_KEY",
-        "metaso_params": {
-            "lang": null,
-            "session_id": null,
-            "third_party_uid": null,
-            "enable_mix": false,
-            "enable_image": false,
-            "engine_type": null
+        "q_key": "q",
+        "extra_params": {
+            "stream": false,
+            "model": "fast_thinking",
+            "format": "simple",
+            "scope": "document"
         }
     },
     {
@@ -36,12 +35,13 @@
         "name": "DeepSeek Chat",
         "api_url": "https://api.deepseek.com/chat/completions",
         "model": "deepseek-chat",
-        "api_type": "openai",
         "default_temperature": 1.0,
         "api_key_name": "DS_LLM_API_KEY",
-        "openai_params": {
+        "extra_params": {
             "system_prompt": null,
-            "max_tokens": null
+            "max_tokens": null,
+            "no_stream": true,
+            "stream": false
         }
     },
     {
@@ -49,12 +49,13 @@
         "name": "DeepSeek Reasoner",
         "api_url": "https://api.deepseek.com/chat/completions",
         "model": "deepseek-reasoner",
-        "api_type": "openai",
         "default_temperature": 0.7,
         "api_key_name": "DS_LLM_API_KEY",
-        "openai_params": {
+        "extra_params": {
             "system_prompt": null,
-            "max_tokens": null
+            "max_tokens": null,
+            "no_stream": true,
+            "stream": false
         }
     },
     {
@@ -62,13 +63,11 @@
         "name": "Qwen-DS API",
         "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
         "model": "deepseek-v3.2",
-        "api_type": "openai",
         "default_temperature": 1.2,
         "api_key_name": "QW_LLM_API_KEY",
-        "openai_params": {
+        "extra_params": {
             "system_prompt": null,
             "max_tokens": null
         }
     }
 ]
-
