@@ -1,7 +1,7 @@
 [project]
-name = "metaso-cli"
-version = "0.1.0"
-description = "CLI tool for calling LLM APIs with streaming support"
+name = "sutra-translation-playground"
+version = "0.5.0"
+description = "CLI tool and Web UI for comparing the results of sutra text translation by calling LLM APIs(metaso and deepseek, etc.)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
