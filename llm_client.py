@@ -258,6 +258,10 @@ class LLMClient:
 
             result = self._make_request(payload)
 
+            if 'answer' in result:
+                # metaso public API
+                return result.get("answer", "")
+
             if result.get("errCode") != 0:
                 err_msg = result.get("errMsg", "Unknown error")
                 raise RuntimeError(f"API error: {err_msg}")
@@ -283,12 +287,12 @@ class LLMClient:
 
             # Build messages array
             messages = []
-            
+
             # Get system_prompt from kwargs first, then from extra_params
             system_prompt = kwargs.get("system_prompt")
             if system_prompt is None:
                 system_prompt = self.extra_params.get("system_prompt")
-            
+
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
@@ -320,7 +324,7 @@ class LLMClient:
             payload = self._apply_extra_params(payload)
 
             result = self._make_request(payload)
-            
+
             # Extract text from response (OpenAI format)
             if "choices" in result and len(result["choices"]) > 0:
                 return result["choices"][0]["message"]["content"]
