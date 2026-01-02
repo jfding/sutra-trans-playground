@@ -13,6 +13,7 @@
         "api_url": "https://api.deepseek.com/chat/completions",
         "model": "deepseek-chat",
         "api_type": "openai",
+        "default_temperature": 1.0,
         "api_key_name": "DS_LLM_API_KEY"
     },
     {
@@ -21,6 +22,7 @@
         "api_url": "https://api.deepseek.com/chat/completions",
         "model": "deepseek-reasoner",
         "api_type": "openai",
+        "default_temperature": 0.7,
         "api_key_name": "DS_LLM_API_KEY"
     },
     {
@@ -29,6 +31,7 @@
         "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
         "model": "deepseek-v3.2",
         "api_type": "openai",
+        "default_temperature": 1.2,
         "api_key_name": "QW_LLM_API_KEY"
     }
 ]

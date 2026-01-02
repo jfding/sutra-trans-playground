@@ -154,11 +154,6 @@ def chat():
     """Handle chat API requests."""
     try:
         data = request.json
-        temperature = float(data.get('temperature', 0.7))
-
-        # Validate temperature
-        if not (0.0 <= temperature <= 2.0):
-            return jsonify({'error': 'Temperature must be between 0.0 and 2.0'}), 400
 
         # Get API configuration ID from request
         config_id = data.get('config_id')
@@ -179,6 +174,16 @@ def chat():
         api_url = api_config.get('api_url')
         model = api_config.get('model')
         api_key_name = api_config.get('api_key_name')
+        default_temperature = api_config.get('default_temperature')
+
+        # Handle temperature: only if config has default_temperature field
+        temperature = None
+        if default_temperature is not None:
+            # Config supports temperature, get from request or use default
+            temperature = float(data.get('temperature', default_temperature))
+            # Validate temperature
+            if not (0.0 <= temperature <= 2.0):
+                return jsonify({'error': 'Temperature must be between 0.0 and 2.0'}), 400
 
         # Validate required fields from config
         if not api_url:
@@ -241,7 +246,7 @@ def chat():
                     for chunk in llm_client.stream_completion(
                         prompt,
                         system_prompt=system_prompt,
-                        temperature=temperature,
+                        temperature=temperature,  # None if config doesn't support temperature
                         max_tokens=max_tokens
                     ):
                         yield f"data: {chunk}\n\n"

@@ -400,7 +400,7 @@ class LLMClient:
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        temperature: float = 0.7,
+        temperature: Optional[float] = None,
         max_tokens: Optional[int] = None
     ) -> Iterator[str]:
         """
@@ -409,7 +409,7 @@ class LLMClient:
         Args:
             prompt: User prompt/input
             system_prompt: Optional system prompt
-            temperature: Sampling temperature
+            temperature: Sampling temperature (None means don't include in request)
             max_tokens: Maximum tokens to generate
 
         Yields:
@@ -427,8 +427,10 @@ class LLMClient:
             "model": self.model,
             "messages": messages,
             "stream": True,
-            "temperature": temperature,
         }
+
+        if temperature is not None:
+            payload["temperature"] = temperature
 
         if max_tokens:
             payload["max_tokens"] = max_tokens
@@ -583,7 +585,7 @@ class LLMClient:
             # Extract chat-specific kwargs
             chat_kwargs = {
                 "system_prompt": kwargs.get("system_prompt"),
-                "temperature": kwargs.get("temperature", 0.7),
+                "temperature": kwargs.get("temperature"),  # None means don't pass temperature
                 "max_tokens": kwargs.get("max_tokens")
             }
             return "".join(self.stream_completion(prompt, **chat_kwargs))

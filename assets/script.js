@@ -174,6 +174,44 @@ async function initializeTabContent(tabId, templateName) {
     // 设置温度滑块事件
     const temperatureSlider = tabContent.querySelector('.temperature');
     const temperatureValue = tabContent.querySelector('.temperature-value');
+    const temperatureGroup = temperatureSlider.closest('.input-group');
+    const temperatureLabel = temperatureGroup.querySelector('label');
+
+    // 更新 temperature 控件状态的函数
+    function updateTemperatureControl() {
+        const selectedIndex = parseInt(apiConfigSelect.value);
+        if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= apiConfigs.length) {
+            return;
+        }
+        const selectedConfig = apiConfigs[selectedIndex];
+        const hasTemperature = selectedConfig.default_temperature !== undefined && selectedConfig.default_temperature !== null;
+
+        if (hasTemperature) {
+            // 启用 temperature 控件
+            temperatureSlider.disabled = false;
+            temperatureSlider.style.opacity = '1';
+            temperatureSlider.style.cursor = 'pointer';
+            temperatureLabel.style.opacity = '1';
+
+            // 设置默认值
+            const defaultTemp = selectedConfig.default_temperature;
+            temperatureSlider.value = defaultTemp;
+            temperatureValue.textContent = parseFloat(defaultTemp).toFixed(1);
+        } else {
+            // 禁用 temperature 控件
+            temperatureSlider.disabled = true;
+            temperatureSlider.style.opacity = '0.5';
+            temperatureSlider.style.cursor = 'not-allowed';
+            temperatureLabel.style.opacity = '0.5';
+        }
+    }
+
+    // 初始化 temperature 控件状态
+    updateTemperatureControl();
+
+    // 当 API 配置改变时，更新 temperature 控件状态
+    apiConfigSelect.addEventListener('change', updateTemperatureControl);
+
     temperatureSlider.addEventListener('input', (e) => {
         temperatureValue.textContent = parseFloat(e.target.value).toFixed(1);
     });
@@ -272,7 +310,7 @@ function loadTabHistory(tabId) {
                 <div style="flex: 1;" onclick="loadHistoryItem('${tabId}', ${index})">
                     <div class="history-prompt">${escapeHtml(item.prompt || item.input_texts?.join(' | ') || '')}</div>
                     <div class="history-response">${escapeHtml((item.response || '').substring(0, 150))}${(item.response || '').length > 150 ? '...' : ''}</div>
-                    <div class="history-meta">Temp: ${item.temperature || 0.7}${apiInfo} • ${new Date(item.timestamp).toLocaleString()}</div>
+                    <div class="history-meta">${item.temperature !== undefined ? `Temp: ${item.temperature}` : ''}${apiInfo} • ${new Date(item.timestamp).toLocaleString()}</div>
                 </div>
                 <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem('${tabId}', ${index})" title="删除">×</button>
             </div>
@@ -306,9 +344,17 @@ async function loadHistoryItem(tabId, index) {
         tabContent.querySelector('.inputText3').value = inputTexts[2] || '';
     }
 
-    // 加载温度
-    tabContent.querySelector('.temperature').value = item.temperature || 0.7;
-    tabContent.querySelector('.temperature-value').textContent = parseFloat(item.temperature || 0.7).toFixed(1);
+    // 加载温度（如果配置支持）
+    const apiConfigSelect = tabContent.querySelector('.apiConfig');
+    const selectedIndex = parseInt(apiConfigSelect.value);
+    if (!isNaN(selectedIndex) && selectedIndex >= 0 && selectedIndex < apiConfigs.length) {
+        const selectedConfig = apiConfigs[selectedIndex];
+        if (selectedConfig.default_temperature !== undefined && selectedConfig.default_temperature !== null) {
+            const temperature = item.temperature !== undefined ? item.temperature : selectedConfig.default_temperature;
+            tabContent.querySelector('.temperature').value = temperature;
+            tabContent.querySelector('.temperature-value').textContent = parseFloat(temperature).toFixed(1);
+        }
+    }
 
     // 显示响应
     tabContent.querySelector('.response').textContent = item.response || '';
@@ -386,11 +432,15 @@ async function submitPrompt(tabId) {
 
     // 准备请求
     const requestBody = {
-        temperature,
         template_name: templateName,
         input_texts,
         config_id: currentApiConfig.id
     };
+
+    // 只有当配置支持 temperature 时才添加 temperature 参数
+    if (currentApiConfig.default_temperature !== undefined && currentApiConfig.default_temperature !== null) {
+        requestBody.temperature = temperature;
+    }
 
     submitBtn.disabled = true;
     responseDiv.textContent = '';
@@ -467,12 +517,16 @@ async function submitPrompt(tabId) {
         const historyItem = {
             prompt: `[Template: ${templateName}] ${input_texts.join(' | ')}`,
             response: fullResponse,
-            temperature,
             template_name: templateName,
             input_texts,
             config_id: currentApiConfig ? currentApiConfig.id : null,
             timestamp: new Date().toISOString()
         };
+
+        // 只有当配置支持 temperature 时才保存 temperature
+        if (currentApiConfig && currentApiConfig.default_temperature !== undefined && currentApiConfig.default_temperature !== null) {
+            historyItem.temperature = temperature;
+        }
 
         if (!tab.history) {
             tab.history = [];
