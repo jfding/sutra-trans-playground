@@ -9,8 +9,15 @@
 <body>
     <div class="container">
         <h1>DeepSeek LLM Chat</h1>
-        
+
         <div class="input-section">
+            <div class="input-group">
+                <label for="apiConfig">API & Model</label>
+                <select id="apiConfig">
+                    <option value="">-- Loading configurations --</option>
+                </select>
+            </div>
+
             <div class="input-group">
                 <label for="template">Template</label>
                 <div class="template-input-group">
@@ -21,7 +28,7 @@
                 </div>
                 <div id="templatePreview" class="template-preview" style="display: none;"></div>
             </div>
-            
+
             <div class="input-group" id="inputTextGroup">
                 <label for="inputText">Input Text</label>
                 <textarea id="inputText" placeholder="Enter text to replace {input_txt} in template..."></textarea>
@@ -36,14 +43,14 @@
                 <label for="inputText3">Input Text 3</label>
                 <textarea id="inputText3" placeholder="Enter text to replace {input3_txt} in template..."></textarea>
             </div>
-            
+
             <div class="input-group">
                 <label for="temperature">Temperature: <span class="temperature-value" id="tempValue">0.7</span></label>
                 <div class="temperature-control">
                     <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
                 </div>
             </div>
-            
+
             <button id="submitBtn" onclick="submitPrompt()">Send</button>
         </div>
 

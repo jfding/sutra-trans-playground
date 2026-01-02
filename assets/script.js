@@ -2,6 +2,62 @@ let history = JSON.parse(localStorage.getItem('llm_history') || '[]');
 let currentTemplateName = null;
 let templateHasInput2 = false;
 let templateHasInput3 = false;
+let apiConfigs = [];
+let currentApiConfig = null;
+
+// Load API configurations on page load
+async function loadApiConfigs() {
+    try {
+        const response = await fetch('/api/configs');
+        const data = await response.json();
+        apiConfigs = data.configs || [];
+        const select = document.getElementById('apiConfig');
+
+        // Clear existing options
+        select.innerHTML = '';
+
+        if (apiConfigs.length === 0) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = '-- No configurations available --';
+            select.appendChild(option);
+            return;
+        }
+
+        // Add options for each configuration
+        apiConfigs.forEach((config, index) => {
+            const option = document.createElement('option');
+            option.value = index;
+            option.textContent = config.name;
+            select.appendChild(option);
+        });
+
+        // Set default selection (first one)
+        if (apiConfigs.length > 0) {
+            select.value = '0';
+            currentApiConfig = apiConfigs[0];
+        }
+    } catch (error) {
+        console.error('Failed to load API configurations:', error);
+        const select = document.getElementById('apiConfig');
+        select.innerHTML = '<option value="">-- Error loading configurations --</option>';
+    }
+}
+
+// Handle API config selection change
+function setupApiConfigSelector() {
+    const apiConfigSelect = document.getElementById('apiConfig');
+    if (apiConfigSelect) {
+        apiConfigSelect.addEventListener('change', (e) => {
+            const index = parseInt(e.target.value);
+            if (!isNaN(index) && index >= 0 && index < apiConfigs.length) {
+                currentApiConfig = apiConfigs[index];
+            } else {
+                currentApiConfig = null;
+            }
+        });
+    }
+}
 
 // Load templates on page load
 async function loadTemplates() {
@@ -115,18 +171,31 @@ function loadHistory() {
         return;
     }
 
-    historyDiv.innerHTML = history.map((item, index) => `
+    historyDiv.innerHTML = history.map((item, index) => {
+        // Find config name from config_id
+        let apiInfo = '';
+        if (item.config_id) {
+            const config = apiConfigs.find(c => c.id === item.config_id);
+            if (config) {
+                apiInfo = ` • API: ${config.name}`;
+            }
+        } else if (item.api_config) {
+            // Fallback for old format
+            apiInfo = ` • API: ${item.api_config.name}`;
+        }
+        return `
         <div class="history-item">
             <div class="history-item-header">
                 <div style="flex: 1;" onclick="loadHistoryItem(${index})">
                     <div class="history-prompt">${escapeHtml(item.prompt)}</div>
                     <div class="history-response">${escapeHtml(item.response.substring(0, 150))}${item.response.length > 150 ? '...' : ''}</div>
-                    <div class="history-meta">Temp: ${item.temperature} • ${new Date(item.timestamp).toLocaleString()}</div>
+                    <div class="history-meta">Temp: ${item.temperature}${apiInfo} • ${new Date(item.timestamp).toLocaleString()}</div>
                 </div>
                 <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryItem(${index})" title="Delete">×</button>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function escapeHtml(text) {
@@ -145,6 +214,47 @@ function deleteHistoryItem(index) {
 
 async function loadHistoryItem(index) {
     const item = history[index];
+
+    // Load API configuration from history
+    if (item.config_id) {
+        // New format: find config by ID
+        const configIndex = apiConfigs.findIndex(config => config.id === item.config_id);
+        if (configIndex >= 0) {
+            document.getElementById('apiConfig').value = configIndex;
+            currentApiConfig = apiConfigs[configIndex];
+        }
+    } else if (item.api_config) {
+        // Fallback for old format: try to find matching config
+        // Try exact match first (api_url, model, and api_key_name)
+        const exactMatch = apiConfigs.findIndex(config =>
+            config.api_url === item.api_config.api_url &&
+            config.model === item.api_config.model &&
+            (config.api_key_name || null) === (item.api_config.api_key_name || null)
+        );
+        if (exactMatch >= 0) {
+            document.getElementById('apiConfig').value = exactMatch;
+            currentApiConfig = apiConfigs[exactMatch];
+        } else {
+            // If exact match not found, try match by api_url and model only
+            const matchingIndex = apiConfigs.findIndex(config =>
+                config.api_url === item.api_config.api_url &&
+                config.model === item.api_config.model
+            );
+            if (matchingIndex >= 0) {
+                document.getElementById('apiConfig').value = matchingIndex;
+                currentApiConfig = apiConfigs[matchingIndex];
+            } else {
+                // If still not found, try to find by name or use first available
+                const nameMatch = apiConfigs.findIndex(config =>
+                    config.name === item.api_config.name
+                );
+                if (nameMatch >= 0) {
+                    document.getElementById('apiConfig').value = nameMatch;
+                    currentApiConfig = apiConfigs[nameMatch];
+                }
+            }
+        }
+    }
 
     // Load template and input text from history
     if (item.template_name) {
@@ -232,11 +342,18 @@ async function submitPrompt() {
         input_texts.push(inputText3);
     }
 
-    // Prepare request payload with template
+    // Get selected API configuration
+    if (!currentApiConfig) {
+        alert('Please select an API & Model configuration');
+        return;
+    }
+
+    // Prepare request payload with template and API config ID
     const requestBody = {
         temperature,
         template_name: currentTemplateName,
-        input_texts
+        input_texts,
+        config_id: currentApiConfig.id
     };
 
     console.log('Submitting with:', requestBody);
@@ -322,6 +439,7 @@ async function submitPrompt() {
             temperature,
             template_name: currentTemplateName,
             input_texts,
+            config_id: currentApiConfig ? currentApiConfig.id : null,
             timestamp: new Date().toISOString()
         };
         history.unshift(historyItem);
@@ -350,7 +468,18 @@ document.getElementById('inputText').addEventListener('keydown', (e) => {
     }
 });
 
-// Load templates and history on page load
-loadTemplates();
-loadHistory();
+// Load API configs, templates and history on page load
+async function initializePage() {
+    await loadApiConfigs();
+    setupApiConfigSelector();
+    loadTemplates();
+    loadHistory();
+}
+
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializePage);
+} else {
+    initializePage();
+}
 

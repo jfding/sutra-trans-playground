@@ -1,5 +1,7 @@
 """Simple Flask web app for LLM API calls."""
 import os
+import json
+import sys
 from flask import Flask, render_template, request, jsonify, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -13,15 +15,60 @@ load_dotenv(dotenv_path=project_root / ".env")
 app = Flask(__name__, template_folder='assets', static_folder='assets', static_url_path='/static')
 CORS(app)
 
-# Initialize LLM client
-client = None
 
-def get_client():
-    """Get or create LLM client instance."""
-    global client
-    if client is None:
-        client = LLMClient(verbose=False)
-    return client
+def load_api_configs():
+    """
+    Load API/model configurations from JSON file.
+
+    Returns:
+        List of API configuration dictionaries
+    """
+    config_file = project_root / "api_configs.json"
+
+    # Default configurations if file doesn't exist
+    default_configs = [
+        {
+            "id": "metaso-default",
+            "name": "Metaso Search",
+            "api_url": os.getenv("LLM_API_URL", "https://metaso.cn/api/open/search"),
+            "model": None,
+            "api_type": "metaso",
+            "api_key_name": "METASO_API_KEY"
+        },
+        {
+            "id": "openai-gpt35",
+            "name": "OpenAI GPT-3.5 Turbo",
+            "api_url": os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions"),
+            "model": "gpt-3.5-turbo",
+            "api_type": "openai",
+            "api_key_name": "OPENAI_API_KEY"
+        },
+    ]
+
+    if not config_file.exists():
+        # If config file doesn't exist, return defaults
+        return default_configs
+
+    try:
+        with open(config_file, 'r', encoding='utf-8') as f:
+            configs = json.load(f)
+
+        if not isinstance(configs, list):
+            # If file exists but format is wrong, return defaults
+            return default_configs
+
+        return configs
+    except (json.JSONDecodeError, IOError) as e:
+        # If file exists but can't be read/parsed, return defaults
+        print(f"Warning: Failed to load api_configs.json: {e}. Using default configurations.", file=sys.stderr)
+        return default_configs
+
+
+# Load API configurations
+DEFAULT_API_CONFIGS = load_api_configs()
+
+# Initialize LLM client cache (will be created per request with selected config)
+client_cache = {}
 
 
 def load_template(template_name: str, input_texts: list[str]) -> str:
@@ -66,17 +113,23 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/api/configs', methods=['GET'])
+def list_configs():
+    """List all available API endpoint and model configurations."""
+    return jsonify({'configs': DEFAULT_API_CONFIGS})
+
+
 @app.route('/api/templates', methods=['GET'])
 def list_templates():
     """List all available templates."""
     template_dir = project_root / "prompt-templates"
     if not template_dir.exists():
         return jsonify({'templates': []})
-    
+
     templates = []
     for file in template_dir.glob("*.txt"):
         templates.append(file.name)
-    
+
     return jsonify({'templates': sorted(templates)})
 
 
@@ -85,10 +138,10 @@ def get_template(template_name):
     """Get template content."""
     template_dir = project_root / "prompt-templates"
     template_path = template_dir / template_name
-    
+
     if not template_path.exists() or not template_path.is_file():
         return jsonify({'error': 'Template not found'}), 404
-    
+
     try:
         content = template_path.read_text(encoding="utf-8")
         return jsonify({'content': content, 'name': template_name})
@@ -102,11 +155,44 @@ def chat():
     try:
         data = request.json
         temperature = float(data.get('temperature', 0.7))
-        
+
         # Validate temperature
         if not (0.0 <= temperature <= 2.0):
             return jsonify({'error': 'Temperature must be between 0.0 and 2.0'}), 400
-        
+
+        # Get API configuration ID from request
+        config_id = data.get('config_id')
+
+        # Find the configuration by ID
+        api_config = None
+        if config_id:
+            for config in DEFAULT_API_CONFIGS:
+                if config.get('id') == config_id:
+                    api_config = config
+                    break
+
+        # If config not found, use first available config or defaults
+        if not api_config:
+            return jsonify({'error': 'No API configuration available'}), 500
+
+        # Extract configuration values
+        api_url = api_config.get('api_url')
+        model = api_config.get('model')
+        api_key_name = api_config.get('api_key_name')
+
+        # Validate required fields from config
+        if not api_url:
+            return jsonify({'error': 'api_url is required in config'}), 500
+        if not api_key_name:
+            return jsonify({'error': 'api_key_name is required in config'}), 500
+
+        # Determine if this is a Metaso API (doesn't use model parameter)
+        is_metaso = api_url and "metaso" in api_url.lower()
+
+        # For model: if None and it's Metaso, keep None; otherwise use default if None
+        if model is None and not is_metaso:
+            return jsonify({'error': 'Model is required for OpenAI API'}), 400
+
         # Handle template-based prompt or direct prompt
         template_name = data.get('template_name')
         input_texts = data.get('input_texts', [])
@@ -124,9 +210,20 @@ def chat():
                 return jsonify({'error': f'Error processing template: {str(e)}'}), 500
         elif not prompt:
             return jsonify({'error': 'Either prompt or template_name with input_texts is required'}), 400
-        
-        llm_client = get_client()
-        
+
+        # Create or get client with specified API URL, model, and api_key_name
+        # Use None for model if it's explicitly None (for Metaso), otherwise use the provided value or default
+        cache_key = f"{api_url}:{model or 'None'}:{api_key_name or 'default'}"
+        if cache_key not in client_cache:
+            # Pass model=None if it's None, otherwise pass the model string
+            client_cache[cache_key] = LLMClient(
+                api_url=api_url,
+                model=model if model else None,
+                api_key_name=api_key_name,
+                verbose=False
+            )
+        llm_client = client_cache[cache_key]
+
         # Check API type
         if llm_client.api_type == "openai":
             # OpenAI API
@@ -137,7 +234,7 @@ def chat():
                     max_tokens = int(os.getenv("LLM_MAX_TOKENS"))
                 except ValueError:
                     pass
-            
+
             # Stream the response
             def generate():
                 try:
@@ -151,7 +248,7 @@ def chat():
                     yield "data: [DONE]\n\n"
                 except Exception as e:
                     yield f"data: ERROR: {str(e)}\n\n"
-            
+
             return Response(generate(), mimetype='text/event-stream')
         else:
             # Metaso API - doesn't support temperature, but we'll call it anyway
@@ -166,7 +263,7 @@ def chat():
             enable_mix = os.getenv("METASO_ENABLE_MIX", "false").lower() in ("true", "1", "yes")
             enable_image = os.getenv("METASO_ENABLE_IMAGE", "false").lower() in ("true", "1", "yes")
             engine_type = os.getenv("METASO_ENGINE_TYPE")
-            
+
             def generate():
                 try:
                     for message in llm_client.stream_search(
@@ -189,9 +286,9 @@ def chat():
                     yield "data: [DONE]\n\n"
                 except Exception as e:
                     yield f"data: ERROR: {str(e)}\n\n"
-            
+
             return Response(generate(), mimetype='text/event-stream')
-    
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

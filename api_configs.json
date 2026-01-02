@@ -1,0 +1,35 @@
+[
+    {
+        "id": "metaso-default",
+        "name": "Metaso API",
+        "api_url": "https://metaso.cn/api/open/search",
+        "model": null,
+        "api_type": "metaso",
+        "api_key_name": "METASO_API_KEY"
+    },
+    {
+        "id": "ds-chat",
+        "name": "DeepSeek Chat",
+        "api_url": "https://api.deepseek.com/chat/completions",
+        "model": "deepseek-chat",
+        "api_type": "openai",
+        "api_key_name": "DS_LLM_API_KEY"
+    },
+    {
+        "id": "ds-reasoner",
+        "name": "DeepSeek Reasoner",
+        "api_url": "https://api.deepseek.com/chat/completions",
+        "model": "deepseek-reasoner",
+        "api_type": "openai",
+        "api_key_name": "DS_LLM_API_KEY"
+    },
+    {
+        "id": "qwen-ds-api",
+        "name": "Qwen-DS API",
+        "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "model": "deepseek-v3.2",
+        "api_type": "openai",
+        "api_key_name": "QW_LLM_API_KEY"
+    }
+]
+

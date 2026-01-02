@@ -18,49 +18,54 @@ class LLMClient:
 
     def __init__(
         self,
-        api_url: Optional[str] = None,
+        api_url: str,
+        model: Optional[str] = None,
+        api_key_name: str = None,
         verbose: bool = False
     ):
         """
         Initialize API client.
 
         Args:
-            api_url: API endpoint URL (defaults to LLM_API_URL env var or auto-detected)
+            api_url: API endpoint URL (required, from config JSON)
+            model: Model name (required for OpenAI API, None for Metaso API)
+            api_key_name: Environment variable name for API key (required, from config JSON)
             verbose: If True, print and save HTTP request details
         """
-        self.verbose = verbose
-        # Get API URL first
-        if api_url:
-            self.api_url = api_url
-        else:
-            self.api_url = os.getenv("LLM_API_URL", "")
-
-        # Set default URL if not provided
         if not api_url:
-            self.api_url = os.getenv("LLM_API_URL", "https://metaso.cn/api/open/search")
+            raise ValueError("api_url is required and must be provided from config JSON")
+        
+        self.verbose = verbose
+        self.api_url = api_url
 
         # Auto-detect API type from URL: if contains 'metaso' (case-insensitive), it's metaso, else openai
-        if self.api_url and "metaso" in self.api_url.lower():
+        if "metaso" in self.api_url.lower():
             self.api_type = "metaso"
         else:
             self.api_type = "openai"
 
-        # Get API key
+        # Get API key from specified environment variable
+        if not api_key_name:
+            raise ValueError("api_key_name is required and must be provided from config JSON")
+        
         if self.api_type == "metaso":
-            # Support both secret-key and api-key authentication
+            # Support both secret-key and api-key authentication for Metaso
             self.secret_key = os.getenv("METASO_SECRET_KEY")
-            self.api_key = os.getenv("LLM_API_KEY") or os.getenv("METASO_API_KEY")
+            self.api_key = os.getenv(api_key_name)
         else:  # openai
-            self.api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+            self.api_key = os.getenv(api_key_name)
             self.secret_key = None
 
+        # Validate API key
         if self.api_type == "metaso" and not self.api_key and not self.secret_key:
-            raise ValueError("API key is required. Set LLM_API_KEY, METASO_API_KEY, or METASO_SECRET_KEY environment variable.")
+            raise ValueError(f"API key is required. Set {api_key_name} or METASO_SECRET_KEY environment variable.")
         elif self.api_type != "metaso" and not self.api_key:
-            raise ValueError("API key is required. Set LLM_API_KEY or OPENAI_API_KEY environment variable.")
+            raise ValueError(f"API key is required. Set {api_key_name} environment variable.")
 
-        # OpenAI-specific settings
-        self.model = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
+        # Set model (required for OpenAI API, None for Metaso)
+        self.model = model
+        if self.api_type != "metaso" and not self.model:
+            raise ValueError("model is required for OpenAI-compatible API")
 
     def _snake_to_camel(self, snake_str: str) -> str:
         """
