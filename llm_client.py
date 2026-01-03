@@ -260,7 +260,15 @@ class LLMClient:
 
             if 'answer' in result:
                 # metaso public API
-                return result.get("answer", "")
+                # filter out the thinking text which start with '>'
+
+                raw_answer = result.get("answer", "")
+                answer = ""
+                for line in raw_answer.split('\n'):
+                    if line.startswith('>'):
+                        continue
+                    answer += line
+                return answer
 
             if result.get("errCode") != 0:
                 err_msg = result.get("errMsg", "Unknown error")
