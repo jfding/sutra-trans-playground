@@ -210,7 +210,7 @@ class LLMClient:
             self.api_url,
             headers=headers,
             json=payload,
-            timeout=60.0
+            timeout=420.0
         )
         response.raise_for_status()
 
@@ -230,6 +230,73 @@ class LLMClient:
             print("="*80 + "\n", file=sys.stderr)
 
         return response.json()
+
+    def _make_streaming_request(self, payload: Dict[str, Any]):
+        """
+        Make HTTP POST request to API with streaming response.
+
+        Args:
+            payload: Request payload dictionary (should already have extra_params applied)
+
+        Yields:
+            Chunks of response text
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream, application/json",
+        }
+
+        # Support both authentication methods
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        # Log request details before sending (always log endpoint and payload)
+        self._log_request_details("POST", self.api_url, headers, payload, None)
+
+        with httpx.stream(
+            "POST",
+            self.api_url,
+            headers=headers,
+            json=payload,
+            timeout=420.0
+        ) as response:
+            response.raise_for_status()
+
+            # Log response status if verbose
+            if self.verbose:
+                print(f"\nResponse Status: {response.status_code}", file=sys.stderr)
+                print("Streaming response...", file=sys.stderr)
+
+            # For OpenAI-compatible streaming responses
+            for line in response.iter_lines():
+                if not line:
+                    continue
+
+                # Handle SSE format (data: {...})
+                if line.startswith("data: "):
+                    line = line[6:]  # Remove "data: " prefix
+
+                if line.strip() == "[DONE]":
+                    break
+
+                try:
+                    data = json.loads(line)
+                    # OpenAI format
+                    if "choices" in data and len(data["choices"]) > 0:
+                        delta = data["choices"][0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+                    # Alternative format
+                    elif "content" in data:
+                        yield data["content"]
+                    # Direct text format
+                    elif isinstance(data, str):
+                        yield data
+                except json.JSONDecodeError:
+                    # If not JSON, treat as plain text
+                    if line.strip():
+                        yield line
 
     def get_full_response(self, prompt: str, **kwargs) -> str:
         """
@@ -342,4 +409,66 @@ class LLMClient:
             else:
                 # Return full response as JSON string if format is unknown
                 return json.dumps(result, ensure_ascii=False, indent=2)
+
+    def get_streaming_response(self, prompt: str, **kwargs):
+        """
+        Get streaming response from API.
+
+        Args:
+            prompt: Query/prompt string
+            **kwargs: Additional parameters that override extra_params if provided
+
+        Yields:
+            Chunks of response text
+        """
+        # Chat API (OpenAI compatible mode) - build payload
+        payload = {}
+
+        # Build messages array
+        messages = []
+
+        # Get system_prompt from kwargs first, then from extra_params
+        system_prompt = kwargs.get("system_prompt")
+        if system_prompt is None:
+            system_prompt = self.extra_params.get("system_prompt")
+
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        payload["messages"] = messages
+
+        # Add model if available
+        if self.model:
+            payload["model"] = self.model
+
+        # Get temperature from kwargs first, then from extra_params
+        temperature = kwargs.get("temperature")
+        if temperature is None and "temperature" in self.extra_params:
+            temperature = self.extra_params.get("temperature")
+        if temperature is not None:
+            payload["temperature"] = temperature
+
+        # Get max_tokens from kwargs first, then from extra_params
+        max_tokens = kwargs.get("max_tokens")
+        if max_tokens is None:
+            max_tokens = self.extra_params.get("max_tokens")
+        if max_tokens is not None:
+            try:
+                max_tokens = int(max_tokens)
+                payload["max_tokens"] = max_tokens
+            except (ValueError, TypeError):
+                pass  # Skip invalid max_tokens
+
+        # Ensure stream is enabled
+        payload["stream"] = True
+
+        # Apply extra_params (kwargs and explicit settings above take precedence)
+        payload = self._apply_extra_params(payload)
+
+        # Override stream to True for streaming
+        payload["stream"] = True
+
+        # Stream response
+        for chunk in self._make_streaming_request(payload):
+            yield chunk
 

@@ -169,6 +169,16 @@ def chat():
         extra_params = api_config.get('extra_params', {})
         q_key = api_config.get('q_key')
 
+        # Detect streaming mode from config
+        # Check stream flag: if stream=True or no_stream=False, use streaming
+        # If stream=False or no_stream=True, use non-streaming
+        # Default to non-streaming if not specified
+        use_streaming = False
+        if 'stream' in extra_params:
+            use_streaming = extra_params.get('stream', False)
+        elif 'no_stream' in extra_params:
+            use_streaming = not extra_params.get('no_stream', True)
+
         # Handle temperature: only if config has default_temperature field
         temperature = None
         if default_temperature is not None:
@@ -220,9 +230,17 @@ def chat():
             kwargs = {}
             if temperature is not None:
                 kwargs['temperature'] = temperature
-            
-            response_text = llm_client.get_full_response(prompt, **kwargs)
-            return jsonify({'response': response_text})
+
+            if use_streaming:
+                # Collect streaming response chunks and return as complete response
+                response_text = ""
+                for chunk in llm_client.get_streaming_response(prompt, **kwargs):
+                    response_text += chunk
+                return jsonify({'response': response_text})
+            else:
+                # Return non-streaming response
+                response_text = llm_client.get_full_response(prompt, **kwargs)
+                return jsonify({'response': response_text})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 

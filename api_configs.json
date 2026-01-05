@@ -53,9 +53,10 @@
         "api_key_name": "DS_LLM_API_KEY",
         "extra_params": {
             "system_prompt": null,
-            "max_tokens": null,
-            "no_stream": true,
-            "stream": false
+            "max_tokens": 1024,
+            "reasoning_effort": "medium",
+            "no_stream": false,
+            "stream": true
         }
     },
     {
