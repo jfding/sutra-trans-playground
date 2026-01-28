@@ -31,6 +31,13 @@
         }
     },
     {
+        "id": "metaso-web",
+        "name": "秘塔 Web",
+        "api_key_name": "METASO_WEB_KEY",
+        "api_url": "http://127.0.0.1:8001/search",
+        "q_key": "query"
+    },
+    {
         "id": "ds-chat",
         "name": "DeepSeek Chat",
         "api_url": "https://api.deepseek.com/chat/completions",

@@ -50,7 +50,9 @@ class LLMClient:
 
         # Validate API key
         if not self.api_key:
-            raise ValueError(f"API key is required. Set {api_key_name} environment variable.")
+            #raise ValueError(f"API key is required. Set {api_key_name} environment variable.")
+            print(f"Warning: API key is required. Set {api_key_name} environment variable.")
+            pass
 
         self.model = model
 
@@ -334,7 +336,7 @@ class LLMClient:
                 for line in raw_answer.split('\n'):
                     if line.startswith('>'):
                         continue
-                    answer += line
+                    answer += f"{line}\n"
                 return answer
 
             if result.get("errCode") != 0:
