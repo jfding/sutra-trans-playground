@@ -1,5 +1,16 @@
 [
     {
+        "id": "chatgpt",
+        "name": "ChatGPT",
+        "api_key_name": "OPENAI_API_KEY",
+        "api_url": "https://api.fake.openai.com/v1/chat/completions",
+        "model": "gpt-5.2",
+        "backend": "openai",
+        "extra_params": {
+            "proxy_url": "http://127.0.0.1:7890"
+        }
+    },
+    {
         "id": "metaso-internal",
         "name": "秘塔 内测API",
         "api_url": "https://metaso.cn/api/open/search",
@@ -34,7 +45,7 @@
         "id": "metaso-web",
         "name": "秘塔 Web",
         "api_key_name": "METASO_WEB_KEY",
-        "api_url": "http://127.0.0.1:8001/search",
+        "api_url": "http://127.0.0.1:8001/search/web",
         "q_key": "query"
     },
     {
@@ -60,7 +71,7 @@
         "api_key_name": "DS_LLM_API_KEY",
         "extra_params": {
             "system_prompt": null,
-            "max_tokens": 1024,
+            "max_tokens": 20480,
             "reasoning_effort": "medium",
             "no_stream": false,
             "stream": true

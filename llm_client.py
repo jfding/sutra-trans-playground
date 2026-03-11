@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
+from openai import OpenAI
 
 # Load .env file from project root
 project_root = Path(__file__).parent
@@ -19,11 +20,12 @@ class LLMClient:
     def __init__(
         self,
         api_url: str,
-        model: str,
-        api_key_name: str = None,
+        model: Optional[str] = None,
+        api_key_name: Optional[str] = None,
         verbose: bool = False,
         extra_params: Optional[Dict[str, Any]] = None,
-        q_key: Optional[str] = None
+        q_key: Optional[str] = None,
+        backend: str = "httpx"
     ):
         """
         Initialize API client.
@@ -35,6 +37,7 @@ class LLMClient:
             verbose: If True, print and save HTTP request details
             extra_params: Optional extra parameters dict that will be automatically added to payload
             q_key: Optional key name for question/prompt in request payload. If None, uses OpenAI compatible mode (messages)
+            backend: Backend to use for API calls: "httpx" (default) or "openai"
         """
         if not api_url:
             raise ValueError("api_url is required and must be provided from config JSON")
@@ -55,12 +58,70 @@ class LLMClient:
             pass
 
         self.model = model
+        self.backend = backend
 
         # Store extra parameters that will be automatically added to payload
         self.extra_params = extra_params or {}
+        
+        # Extract proxy_url from extra_params if present (not sent to API)
+        self.proxy_url = None
+        if 'proxy_url' in self.extra_params:
+            proxy_url = self.extra_params.pop('proxy_url')
+            if proxy_url:  # Only store non-empty proxy URLs
+                self.proxy_url = proxy_url
+        
+        # If proxy_url not set in config, check environment variable
+        if not self.proxy_url and backend == "openai":
+            env_proxy = os.getenv("OPENAI_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY") or os.getenv("ALL_PROXY")
+            if env_proxy:
+                self.proxy_url = env_proxy
+        
+        # Log proxy configuration (mask credentials in URL)
+        if self.proxy_url and backend == "openai":
+            # Basic masking of credentials in proxy URL
+            import urllib.parse
+            try:
+                parsed = urllib.parse.urlparse(self.proxy_url)
+                if parsed.username or parsed.password:
+                    # Mask credentials
+                    netloc = f"{'***' if parsed.username else ''}:{'***' if parsed.password else ''}@{parsed.hostname}"
+                    if parsed.port:
+                        netloc += f":{parsed.port}"
+                    masked_url = urllib.parse.urlunparse(parsed._replace(netloc=netloc))
+                    print(f"Using proxy for OpenAI API: {masked_url}", file=sys.stderr)
+                else:
+                    print(f"Using proxy for OpenAI API: {self.proxy_url}", file=sys.stderr)
+            except Exception:
+                # If URL parsing fails, print generic message
+                print("Using proxy for OpenAI API (URL masked)", file=sys.stderr)
 
         # Store question key name (if None, means OpenAI compatible mode)
         self.q_key = q_key
+
+        # Initialize OpenAI client if backend is "openai"
+        self.openai_client = None
+        if self.backend == "openai":
+            # Use api_url as base_url if it's not the default OpenAI endpoint
+            base_url = None
+            if self.api_url and self.api_url != "https://api.openai.com/v1":
+                # Heuristic: extract base URL up to /v1 if present
+                import re
+                match = re.match(r"(https?://[^/]+/v1)/.*", self.api_url)
+                if match:
+                    base_url = match.group(1)
+                else:
+                    base_url = self.api_url.rstrip('/')
+            # Create HTTP client with proxy if configured
+            http_client = None
+            if self.proxy_url:
+                # Create httpx client with proxy
+                http_client = httpx.Client(proxy=self.proxy_url)
+            
+            self.openai_client = OpenAI(
+                api_key=self.api_key, 
+                base_url=base_url,
+                http_client=http_client
+            )
 
     def _apply_extra_params(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -104,6 +165,7 @@ class LLMClient:
             response: Optional response object
         """
         # Always log endpoint and payload, even if verbose=False
+        response_body_preview = None
 
         # Mask sensitive headers
         safe_headers = {}
@@ -134,6 +196,7 @@ class LLMClient:
 
         if response:
             # Get response body preview
+            response_body_preview = "[Response body not available]"
             try:
                 # Try to read response body
                 response_body = response.text
@@ -143,7 +206,7 @@ class LLMClient:
                     response_body_preview = response_body
             except (AttributeError, Exception):
                 # If we can't read the body (e.g., it's already been consumed or it's binary)
-                response_body_preview = "[Response body not available]"
+                pass
 
             log_entry["response"] = {
                 "status_code": response.status_code,
@@ -171,6 +234,7 @@ class LLMClient:
                 for key, value in response.headers.items():
                     print(f"  {key}: {value}", file=sys.stderr)
                 print(f"\nResponse Body Preview:", file=sys.stderr)
+                assert response_body_preview is not None
                 print(response_body_preview, file=sys.stderr)
 
         print("="*80 + "\n", file=sys.stderr)
@@ -196,42 +260,94 @@ class LLMClient:
         Returns:
             API response as dictionary
         """
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
+        if self.backend == "openai":
+            # Use OpenAI SDK
+            cclient = OpenAI()
+            resp = cclient.responses.create(
+                    model="gpt-5.2",
+                    input=payload['messages']
+                    )
+            print(resp.output_text)
+            return resp.output_text
 
-        # Support both authentication methods
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
 
-        # Log request details before sending (always log endpoint and payload)
-        self._log_request_details("POST", self.api_url, headers, payload, None)
 
-        response = httpx.post(
-            self.api_url,
-            headers=headers,
-            json=payload,
-            timeout=420.0
-        )
-        response.raise_for_status()
 
-        # Log response status if verbose
-        if self.verbose:
-            print(f"\nResponse Status: {response.status_code}", file=sys.stderr)
-            try:
-                response_body = response.text
-                if len(response_body) > 1000:
-                    response_body_preview = response_body[:1000] + f"\n... (truncated, total length: {len(response_body)} chars)"
-                else:
-                    response_body_preview = response_body
-                print(f"Response Body Preview:", file=sys.stderr)
-                print(response_body_preview, file=sys.stderr)
-            except Exception:
-                print("[Response body not available]", file=sys.stderr)
-            print("="*80 + "\n", file=sys.stderr)
 
-        return response.json()
+
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            # Log request details before sending (always log endpoint and payload)
+            self._log_request_details("POST", self.api_url, headers, payload, None)
+            
+            # Prepare parameters for OpenAI SDK
+            # Remove stream if present (non-streaming request)
+            payload = {k: v for k, v in payload.items() if k != "stream"}
+            # Call OpenAI SDK
+            assert self.openai_client is not None
+            response = self.openai_client.chat.completions.create(**payload)
+            # Convert response to dict
+            result = response.model_dump()
+            
+            # Log response status if verbose
+            if self.verbose:
+                print(f"\nResponse Status: 200", file=sys.stderr)
+                try:
+                    response_body = json.dumps(result, ensure_ascii=False)
+                    if len(response_body) > 1000:
+                        response_body_preview = response_body[:1000] + f"\n... (truncated, total length: {len(response_body)} chars)"
+                    else:
+                        response_body_preview = response_body
+                    print(f"Response Body Preview:", file=sys.stderr)
+                    assert response_body_preview is not None
+                    print(response_body_preview, file=sys.stderr)
+                except Exception:
+                    print("[Response body not available]", file=sys.stderr)
+                print("="*80 + "\n", file=sys.stderr)
+            return result
+        else:
+            # Original httpx implementation
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+
+            # Support both authentication methods
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+
+            # Log request details before sending (always log endpoint and payload)
+            self._log_request_details("POST", self.api_url, headers, payload, None)
+
+            response = httpx.post(
+                self.api_url,
+                headers=headers,
+                json=payload,
+                timeout=420.0
+            )
+            response.raise_for_status()
+
+            # Log response status if verbose
+            if self.verbose:
+                print(f"\nResponse Status: {response.status_code}", file=sys.stderr)
+                try:
+                    response_body = response.text
+                    if len(response_body) > 1000:
+                        response_body_preview = response_body[:1000] + f"\n... (truncated, total length: {len(response_body)} chars)"
+                    else:
+                        response_body_preview = response_body
+                    print(f"Response Body Preview:", file=sys.stderr)
+                    assert response_body_preview is not None
+                    print(response_body_preview, file=sys.stderr)
+                except Exception:
+                    print("[Response body not available]", file=sys.stderr)
+                print("="*80 + "\n", file=sys.stderr)
+
+            return response.json()
 
     def _make_streaming_request(self, payload: Dict[str, Any]):
         """
@@ -243,62 +359,91 @@ class LLMClient:
         Yields:
             Chunks of response text
         """
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream, application/json",
-        }
-
-        # Support both authentication methods
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        # Log request details before sending (always log endpoint and payload)
-        self._log_request_details("POST", self.api_url, headers, payload, None)
-
-        with httpx.stream(
-            "POST",
-            self.api_url,
-            headers=headers,
-            json=payload,
-            timeout=420.0
-        ) as response:
-            response.raise_for_status()
-
+        if self.backend == "openai":
+            # Use OpenAI SDK streaming
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream, application/json",
+            }
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            # Log request details before sending (always log endpoint and payload)
+            self._log_request_details("POST", self.api_url, headers, payload, None)
+            
+            # Ensure stream=True
+            payload["stream"] = True
+            # Call OpenAI SDK streaming
+            assert self.openai_client is not None
+            stream = self.openai_client.chat.completions.create(**payload)
+            
             # Log response status if verbose
             if self.verbose:
-                print(f"\nResponse Status: {response.status_code}", file=sys.stderr)
+                print(f"\nResponse Status: 200", file=sys.stderr)
                 print("Streaming response...", file=sys.stderr)
+            
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        yield content
+        else:
+            # Original httpx implementation
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream, application/json",
+            }
 
-            # For OpenAI-compatible streaming responses
-            for line in response.iter_lines():
-                if not line:
-                    continue
+            # Support both authentication methods
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
 
-                # Handle SSE format (data: {...})
-                if line.startswith("data: "):
-                    line = line[6:]  # Remove "data: " prefix
+            # Log request details before sending (always log endpoint and payload)
+            self._log_request_details("POST", self.api_url, headers, payload, None)
 
-                if line.strip() == "[DONE]":
-                    break
+            with httpx.stream(
+                "POST",
+                self.api_url,
+                headers=headers,
+                json=payload,
+                timeout=420.0
+            ) as response:
+                response.raise_for_status()
 
-                try:
-                    data = json.loads(line)
-                    # OpenAI format
-                    if "choices" in data and len(data["choices"]) > 0:
-                        delta = data["choices"][0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            yield content
-                    # Alternative format
-                    elif "content" in data:
-                        yield data["content"]
-                    # Direct text format
-                    elif isinstance(data, str):
-                        yield data
-                except json.JSONDecodeError:
-                    # If not JSON, treat as plain text
-                    if line.strip():
-                        yield line
+                # Log response status if verbose
+                if self.verbose:
+                    print(f"\nResponse Status: {response.status_code}", file=sys.stderr)
+                    print("Streaming response...", file=sys.stderr)
+
+                # For OpenAI-compatible streaming responses
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+
+                    # Handle SSE format (data: {...})
+                    if line.startswith("data: "):
+                        line = line[6:]  # Remove "data: " prefix
+
+                    if line.strip() == "[DONE]":
+                        break
+
+                    try:
+                        data = json.loads(line)
+                        # OpenAI format
+                        if "choices" in data and len(data["choices"]) > 0:
+                            delta = data["choices"][0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                yield content
+                        # Alternative format
+                        elif "content" in data:
+                            yield data["content"]
+                        # Direct text format
+                        elif isinstance(data, str):
+                            yield data
+                    except json.JSONDecodeError:
+                        # If not JSON, treat as plain text
+                        if line.strip():
+                            yield line
 
     def get_full_response(self, prompt: str, **kwargs) -> str:
         """
@@ -317,6 +462,7 @@ class LLMClient:
 
         if is_search_api:
             # Search API - build payload
+            assert self.q_key is not None
             question_key = self.q_key
             payload = {
                 question_key: prompt[:2000],  # Max 2000 chars

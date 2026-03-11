@@ -208,6 +208,7 @@ def main():
         api_key_name = api_config.get('api_key_name')
         extra_params = api_config.get('extra_params', {})
         q_key = api_config.get('q_key')
+        backend = api_config.get('backend', 'httpx')
 
         # Initialize client
         client = LLMClient(
@@ -216,7 +217,8 @@ def main():
             api_key_name=api_key_name,
             verbose=args.verbose,
             extra_params=extra_params,
-            q_key=q_key
+            q_key=q_key,
+            backend=backend
         )
 
         # Determine API type: if q_key is defined, it's a search API (non-OpenAI compatible)

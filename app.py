@@ -168,6 +168,7 @@ def chat():
         default_temperature = api_config.get('default_temperature')
         extra_params = api_config.get('extra_params', {})
         q_key = api_config.get('q_key')
+        backend = api_config.get('backend', 'httpx')
 
         # Detect streaming mode from config
         # Check stream flag: if stream=True or no_stream=False, use streaming
@@ -213,7 +214,7 @@ def chat():
             return jsonify({'error': 'Either prompt or template_name with input_texts is required'}), 400
 
         # Create or get client with specified API URL, model, and api_key_name
-        cache_key = f"{api_url}:{model or 'None'}"
+        cache_key = f"{api_url}:{model or 'None'}:{backend}"
         if cache_key not in client_cache:
             client_cache[cache_key] = LLMClient(
                 api_url=api_url,
@@ -221,7 +222,8 @@ def chat():
                 api_key_name=api_key_name,
                 verbose=False,
                 extra_params=extra_params,
-                q_key=q_key
+                q_key=q_key,
+                backend=backend
             )
         llm_client = client_cache[cache_key]
 
