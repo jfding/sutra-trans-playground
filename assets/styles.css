@@ -25,6 +25,34 @@ h1 {
     font-size: 24px;
 }
 
+.template-manager {
+    margin-bottom: 24px;
+    padding: 16px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background: #fafcff;
+}
+
+.template-manager h2 {
+    font-size: 18px;
+    color: #333;
+    margin-bottom: 12px;
+}
+
+.template-manager-fields textarea {
+    min-height: 100px;
+}
+
+.template-save-message {
+    margin-top: 10px;
+    color: #0b6b2d;
+    font-size: 13px;
+}
+
+.template-save-message.error {
+    color: #b42318;
+}
+
 .input-section {
     margin-bottom: 20px;
 }

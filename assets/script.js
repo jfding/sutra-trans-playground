@@ -71,7 +71,7 @@ async function loadTemplates() {
 // 加载模板内容
 async function loadTemplateContent(templateName) {
     try {
-        const response = await fetch(`/api/templates/${templateName}`);
+        const response = await fetch(`/api/templates/${encodeURIComponent(templateName)}`);
         if (!response.ok) {
             throw new Error('Failed to load template');
         }
@@ -80,6 +80,69 @@ async function loadTemplateContent(templateName) {
     } catch (error) {
         console.error('Failed to load template content:', error);
         return null;
+    }
+}
+
+function updateTemplateSelectorOptions() {
+    const templateSelector = document.getElementById('templateSelector');
+    if (!templateSelector) return;
+
+    templateSelector.innerHTML = '<option value="">+ 添加标签页</option>';
+    templates.forEach(template => {
+        const option = document.createElement('option');
+        option.value = template;
+        option.textContent = template;
+        templateSelector.appendChild(option);
+    });
+}
+
+async function saveTemplateFromForm() {
+    const nameInput = document.getElementById('newTemplateName');
+    const contentInput = document.getElementById('newTemplateContent');
+    const message = document.getElementById('templateSaveMessage');
+    const saveBtn = document.getElementById('saveTemplateBtn');
+
+    const name = nameInput.value.trim();
+    const content = contentInput.value.trim();
+
+    if (!name || !content) {
+        message.textContent = 'Template name and content are required.';
+        message.classList.add('error');
+        message.style.display = 'block';
+        return;
+    }
+
+    saveBtn.disabled = true;
+    message.style.display = 'none';
+    message.classList.remove('error');
+
+    try {
+        const response = await fetch('/api/templates', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ name, content })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to save template');
+        }
+
+        await loadTemplates();
+        updateTemplateSelectorOptions();
+
+        message.textContent = `Template saved: ${data.name}`;
+        message.classList.remove('error');
+        message.style.display = 'block';
+        addNewTab(data.name);
+    } catch (error) {
+        message.textContent = error.message;
+        message.classList.add('error');
+        message.style.display = 'block';
+    } finally {
+        saveBtn.disabled = false;
     }
 }
 
@@ -565,18 +628,16 @@ async function initializePage() {
 
     // 设置模板选择器
     const templateSelector = document.getElementById('templateSelector');
-    templates.forEach(template => {
-        const option = document.createElement('option');
-        option.value = template;
-        option.textContent = template;
-        templateSelector.appendChild(option);
-    });
+    updateTemplateSelectorOptions();
 
     templateSelector.addEventListener('change', (e) => {
         if (e.target.value) {
             addNewTab(e.target.value);
         }
     });
+
+    const saveTemplateBtn = document.getElementById('saveTemplateBtn');
+    saveTemplateBtn.addEventListener('click', saveTemplateFromForm);
 
     // 从存储中加载历史记录，为有历史记录的模板创建标签页
     const historyByTemplate = loadHistoryFromStorage();

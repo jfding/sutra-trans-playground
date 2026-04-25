@@ -10,6 +10,22 @@
     <div class="container">
         <h1>DeepSeek LLM Chat</h1>
 
+        <div class="template-manager">
+            <h2>Create Your Template</h2>
+            <div class="template-manager-fields">
+                <div class="input-group">
+                    <label for="newTemplateName">Template Name</label>
+                    <input id="newTemplateName" type="text" placeholder="e.g. custom-translation">
+                </div>
+                <div class="input-group">
+                    <label for="newTemplateContent">Template Content</label>
+                    <textarea id="newTemplateContent" placeholder="Use placeholders like {input_txt}, {input2_txt}, {input3_txt}"></textarea>
+                </div>
+                <button id="saveTemplateBtn" type="button">Save Template</button>
+                <div id="templateSaveMessage" class="template-save-message" style="display: none;"></div>
+            </div>
+        </div>
+
         <!-- 标签页栏 -->
         <div class="tabs-container">
             <div class="tabs-header" id="tabsHeader">

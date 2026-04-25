@@ -16,6 +16,55 @@ app = Flask(__name__, template_folder='assets', static_folder='assets', static_u
 CORS(app)
 
 
+def get_builtin_template_dir() -> Path:
+    return project_root / "prompt-templates"
+
+
+def get_user_template_dir() -> Path:
+    configured_dir = app.config.get("USER_TEMPLATE_DIR")
+    if configured_dir:
+        return Path(configured_dir)
+    return project_root / "user-templates"
+
+
+def normalize_template_name(raw_name: str) -> str:
+    normalized = (raw_name or "").strip()
+    if not normalized:
+        raise ValueError("Template name is required")
+    if "/" in normalized or "\\" in normalized:
+        raise ValueError("Template name cannot contain path separators")
+    if normalized in {".", ".."}:
+        raise ValueError("Template name is invalid")
+    if normalized.endswith(".txt"):
+        normalized = normalized[:-4]
+    normalized = normalized.strip()
+    if not normalized:
+        raise ValueError("Template name is required")
+    return f"{normalized}.txt"
+
+
+def resolve_template_path(template_name: str) -> Path:
+    normalized_name = normalize_template_name(template_name)
+    user_path = get_user_template_dir() / normalized_name
+    if user_path.exists() and user_path.is_file():
+        return user_path
+    builtin_path = get_builtin_template_dir() / normalized_name
+    if builtin_path.exists() and builtin_path.is_file():
+        return builtin_path
+    raise FileNotFoundError(f"Template file not found: {normalized_name}")
+
+
+def list_template_names() -> list[str]:
+    template_names: set[str] = set()
+    for template_dir in [get_builtin_template_dir(), get_user_template_dir()]:
+        if not template_dir.exists():
+            continue
+        for file in template_dir.glob("*.txt"):
+            if file.is_file():
+                template_names.add(file.name)
+    return sorted(template_names)
+
+
 def load_api_configs():
     """
     Load API/model configurations from JSON file.
@@ -76,11 +125,7 @@ def load_template(template_name: str, input_texts: list[str]) -> str:
     Returns:
         Template content with placeholders replaced
     """
-    template_dir = project_root / "prompt-templates"
-    template_path = template_dir / template_name
-
-    if not template_path.exists():
-        raise FileNotFoundError(f"Template file not found: {template_path}")
+    template_path = resolve_template_path(template_name)
 
     template_content = template_path.read_text(encoding="utf-8")
 
@@ -113,24 +158,35 @@ def list_configs():
 @app.route('/api/templates', methods=['GET'])
 def list_templates():
     """List all available templates."""
-    template_dir = project_root / "prompt-templates"
-    if not template_dir.exists():
-        return jsonify({'templates': []})
+    return jsonify({'templates': list_template_names()})
 
-    templates = []
-    for file in template_dir.glob("*.txt"):
-        templates.append(file.name)
 
-    return jsonify({'templates': sorted(templates)})
+@app.route('/api/templates', methods=['POST'])
+def create_template():
+    """Create or update a user template."""
+    data = request.json or {}
+    try:
+        template_name = normalize_template_name(data.get("name", ""))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    content = data.get("content", "")
+    if not isinstance(content, str) or not content.strip():
+        return jsonify({'error': 'Template content is required'}), 400
+
+    template_dir = get_user_template_dir()
+    template_dir.mkdir(parents=True, exist_ok=True)
+    template_path = template_dir / template_name
+    template_path.write_text(content, encoding="utf-8")
+    return jsonify({'name': template_name}), 201
 
 
 @app.route('/api/templates/<template_name>', methods=['GET'])
 def get_template(template_name):
     """Get template content."""
-    template_dir = project_root / "prompt-templates"
-    template_path = template_dir / template_name
-
-    if not template_path.exists() or not template_path.is_file():
+    try:
+        template_path = resolve_template_path(template_name)
+    except (ValueError, FileNotFoundError):
         return jsonify({'error': 'Template not found'}), 404
 
     try:
